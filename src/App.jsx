@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Users, Calendar, Plus, Trash2, Save, X,
   Medal, Activity, LayoutDashboard, UserPlus,
-  ChevronRight, CheckCircle2, AlertCircle, Pencil, Table2, Filter
+  ChevronRight, CheckCircle2, AlertCircle, Pencil, Table2, Filter, Camera
 } from 'lucide-react';
 
 // --- UI Components ---
@@ -105,12 +105,20 @@ export default function App() {
   // Registration Form State
   const [regForm, setRegForm] = useState({
     name: '',
+    rollNumber: '',
+    fatherName: '',
+    photo: '',
     classVal: '',
     gender: '',
     sports: []
   });
 
   const [editingId, setEditingId] = useState(null);
+
+  // Camera State
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
 
   // Filter State
   const [filters, setFilters] = useState({
@@ -137,10 +145,13 @@ export default function App() {
   // --- Logic & Handlers ---
 
   const handleStudentSubmit = () => {
-    if (!regForm.name || !regForm.classVal || !regForm.gender || regForm.sports.length === 0) return;
+    if (!regForm.name || !regForm.rollNumber || !regForm.fatherName || !regForm.classVal || !regForm.gender || regForm.sports.length === 0) return;
 
     const studentData = {
       name: regForm.name,
+      rollNumber: regForm.rollNumber,
+      fatherName: regForm.fatherName,
+      photo: regForm.photo,
       classVal: parseInt(regForm.classVal),
       gender: regForm.gender,
       category: getCategory(regForm.classVal),
@@ -160,13 +171,16 @@ export default function App() {
       setStudents([...students, newStudent]);
     }
 
-    setRegForm({ name: '', classVal: '', gender: '', sports: [] });
+    setRegForm({ name: '', rollNumber: '', fatherName: '', photo: '', classVal: '', gender: '', sports: [] });
   };
 
   const startEdit = (student) => {
     setEditingId(student.id);
     setRegForm({
       name: student.name,
+      rollNumber: student.rollNumber || '',
+      fatherName: student.fatherName || '',
+      photo: student.photo || '',
       classVal: student.classVal,
       gender: student.gender,
       sports: student.sports
@@ -176,7 +190,7 @@ export default function App() {
 
   const cancelEdit = () => {
     setEditingId(null);
-    setRegForm({ name: '', classVal: '', gender: '', sports: [] });
+    setRegForm({ name: '', rollNumber: '', fatherName: '', photo: '', classVal: '', gender: '', sports: [] });
   };
 
   const toggleSportSelection = (sport) => {
@@ -223,6 +237,47 @@ export default function App() {
 
   const resetFilters = () => {
     setFilters({ category: '', gender: '', classVal: '', sport: '' });
+  };
+
+  // --- Camera Logic ---
+
+  const startCamera = async () => {
+    try {
+      setIsCameraOpen(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access camera. Please ensure permissions are granted.");
+      setIsCameraOpen(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg');
+      setRegForm(prev => ({ ...prev, photo: dataUrl }));
+      stopCamera();
+    }
   };
 
   // --- Derived Data for UI ---
@@ -402,80 +457,201 @@ export default function App() {
           )}
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Full Name</label>
-            <Input
-              value={regForm.name}
-              onChange={e => setRegForm({ ...regForm, name: e.target.value })}
-              placeholder="e.g. Rahul Kumar"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col-reverse md:flex-row gap-6">
+          {/* Left Column: Personal Details */}
+          <div className="flex-1 space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Class (4-10)</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Full Name</label>
               <Input
-                type="number"
-                min="4" max="10"
-                value={regForm.classVal}
-                onChange={e => setRegForm({ ...regForm, classVal: e.target.value })}
-                placeholder="Class"
+                value={regForm.name}
+                onChange={e => setRegForm({ ...regForm, name: e.target.value })}
+                placeholder="e.g. Rahul Kumar"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Gender</label>
-              <Select
-                value={regForm.gender}
-                onChange={e => setRegForm({ ...regForm, gender: e.target.value })}
-                options={[
-                  { value: 'Boys', label: 'Boy' },
-                  { value: 'Girls', label: 'Girl' }
-                ]}
-                placeholder="Select..."
-              />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Roll Number</label>
+                <Input
+                  value={regForm.rollNumber}
+                  onChange={e => setRegForm({ ...regForm, rollNumber: e.target.value })}
+                  placeholder="e.g. 101"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Father's Name</label>
+                <Input
+                  value={regForm.fatherName}
+                  onChange={e => setRegForm({ ...regForm, fatherName: e.target.value })}
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Class (4-10)</label>
+                <Input
+                  type="number"
+                  min="4" max="10"
+                  value={regForm.classVal}
+                  onChange={e => setRegForm({ ...regForm, classVal: e.target.value })}
+                  placeholder="Class"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Gender</label>
+                <Select
+                  value={regForm.gender}
+                  onChange={e => setRegForm({ ...regForm, gender: e.target.value })}
+                  options={[
+                    { value: 'Boys', label: 'Boy' },
+                    { value: 'Girls', label: 'Girl' }
+                  ]}
+                  placeholder="Select..."
+                />
+              </div>
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase flex justify-between">
-              Select Sports
-              <span className={`text-xs ${regForm.sports.length === 3 ? 'text-red-500' : 'text-slate-400'}`}>
-                {regForm.sports.length}/3 Selected
-              </span>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {AVAILABLE_SPORTS.map(sport => (
-                <button
-                  key={sport}
-                  onClick={() => toggleSportSelection(sport)}
-                  className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all text-left ${regForm.sports.includes(sport)
-                      ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
-                    }`}
+          {/* Right Column: Profile Photo */}
+          <div className="flex flex-col items-center justify-start pt-2">
+            <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase text-center">Photo</label>
+
+            {isCameraOpen ? (
+              <div className="relative w-48 h-48 bg-black rounded-xl overflow-hidden shadow-md flex flex-col">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-4">
+                  <button
+                    onClick={capturePhoto}
+                    className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform"
+                    title="Capture"
+                  >
+                    <div className="w-8 h-8 rounded-full border-2 border-slate-300 bg-red-500"></div>
+                  </button>
+                  <button
+                    onClick={stopCamera}
+                    className="w-10 h-10 bg-slate-800/80 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-slate-700 transition-colors"
+                    title="Cancel"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 items-center">
+                <div
+                  onClick={startCamera}
+                  className="relative group cursor-pointer w-32 h-32 rounded-full border-4 border-slate-100 hover:border-indigo-100 overflow-hidden transition-all shadow-sm bg-slate-50 flex items-center justify-center"
                 >
-                  {sport}
-                </button>
-              ))}
-            </div>
-          </div>
+                  {regForm.photo ? (
+                    <img src={regForm.photo} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-slate-300 group-hover:text-indigo-400 transition-colors">
+                      <Camera size={40} />
+                      <span className="text-[10px] uppercase font-bold mt-1">Camera</span>
+                    </div>
+                  )}
 
-          <Button
-            onClick={handleStudentSubmit}
-            className={`w-full mt-2 ${editingId ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20' : ''}`}
-            disabled={!regForm.name || !regForm.classVal || !regForm.gender || regForm.sports.length === 0}
-          >
-            {editingId ? 'Update Student' : 'Register Student'}
-          </Button>
+                  {/* Hover Overlay for camera trigger */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                    {!regForm.photo && <Camera className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md" size={32} />}
+                    {regForm.photo && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startCamera(); }}
+                          className="w-8 h-8 bg-white/90 rounded-full flex items-center justify-center text-slate-700 hover:text-indigo-600 shadow-sm opacity-0 group-hover:opacity-100 transition-all"
+                          title="Retake Photo"
+                        >
+                          <Camera size={16} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setRegForm({ ...regForm, photo: '' }); }}
+                          className="w-8 h-8 bg-white/90 rounded-full flex items-center justify-center text-slate-700 hover:text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-all"
+                          title="Remove Photo"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => document.getElementById('photo-upload').click()}
+                    className="px-4 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:border-indigo-200 rounded-lg transition-all flex items-center gap-2 shadow-sm"
+                  >
+                    Upload Image
+                  </button>
+                </div>
+
+                <input
+                  id="photo-upload"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setRegForm(prev => ({ ...prev, photo: reader.result }));
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase flex justify-between">
+            Select Sports
+            <span className={`text-xs ${regForm.sports.length === 3 ? 'text-red-500' : 'text-slate-400'}`}>
+              {regForm.sports.length}/3 Selected
+            </span>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {AVAILABLE_SPORTS.map(sport => (
+              <button
+                key={sport}
+                onClick={() => toggleSportSelection(sport)}
+                className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all text-left ${regForm.sports.includes(sport)
+                  ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm'
+                  : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+                  }`}
+              >
+                {sport}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Button
+          onClick={handleStudentSubmit}
+          className={`w-full mt-2 ${editingId ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20' : ''}`}
+          disabled={!regForm.name || !regForm.rollNumber || !regForm.fatherName || !regForm.classVal || !regForm.gender || regForm.sports.length === 0}
+        >
+          {editingId ? 'Update Student' : 'Register Student'}
+        </Button>
       </Card>
 
       {!editingId && (
         <div className="text-center mt-6 text-slate-500 text-sm">
           Want to see the list? Go to the <button onClick={() => setActiveTab('participants')} className="text-indigo-600 font-bold hover:underline">Participants Tab</button>.
         </div>
-      )}
-    </div>
+      )
+      }
+    </div >
   );
 
   const renderParticipants = () => (
@@ -888,8 +1064,8 @@ export default function App() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-all whitespace-nowrap border-b-4 ${activeTab === tab.id
-                  ? 'border-white text-white bg-indigo-700 rounded-t-lg'
-                  : 'border-transparent text-indigo-100 hover:bg-indigo-500 hover:text-white rounded-t-lg'
+                ? 'border-white text-white bg-indigo-700 rounded-t-lg'
+                : 'border-transparent text-indigo-100 hover:bg-indigo-500 hover:text-white rounded-t-lg'
                 }`}
             >
               <tab.icon size={16} />
