@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Users, Calendar, Plus, Trash2, Save, X,
   Medal, Activity, LayoutDashboard, UserPlus,
-  ChevronRight, CheckCircle2, AlertCircle, Pencil, Table2, Filter, Camera
+  ChevronRight, CheckCircle2, AlertCircle, Pencil, Table2, Filter, Camera, RotateCcw, Settings
 } from 'lucide-react';
 
 // --- UI Components ---
@@ -75,14 +75,15 @@ const Badge = ({ children, color = "blue" }) => {
 
 const getCategory = (cls) => {
   const c = parseInt(cls);
-  if (c >= 4 && c <= 5) return 'Juniors (4-5)';
-  if (c >= 6 && c <= 7) return 'Middle (6-7)';
-  if (c >= 8 && c <= 10) return 'Seniors (8-10)';
+  if (c >= 1 && c <= 3) return 'Junior (1-3)';
+  if (c >= 4 && c <= 6) return 'Middle (4-6)';
+  if (c >= 7 && c <= 10) return 'Senior (7-10)';
   return 'Unknown';
 };
 
-const AVAILABLE_SPORTS = [
-  'Badminton', 'Chess', 'Table Tennis', 'Carrom', '100m Race', 'Football', 'Basketball'
+const DEFAULT_GAMES = [
+  'Badminton', 'Carrom (1vs1)', 'Carrom (2vs2)', 'Chess', 'Ludo', 'Slow Cycle Race', 
+  'Race', 'Sack Race', 'Spoon Race', 'High Jump', 'Long Jump', 'Skipping', 'Musical Chair', 'Discus Throw'
 ];
 
 // --- Main Application ---
@@ -91,6 +92,25 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   // --- State ---
+
+  const [games, setGames] = useState(() => {
+    const saved = localStorage.getItem('sports_games');
+    return saved ? JSON.parse(saved) : DEFAULT_GAMES;
+  });
+
+  const [newGameName, setNewGameName] = useState('');
+
+  const [gameConfigs, setGameConfigs] = useState(() => {
+    const saved = localStorage.getItem('sports_game_configs');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    // Set default player counts for specific games
+    return {
+      'Carrom (1vs1)': 2,
+      'Carrom (2vs2)': 4
+    };
+  });
 
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('sports_students');
@@ -132,17 +152,58 @@ export default function App() {
   const [scheduleForm, setScheduleForm] = useState({
     sport: '',
     category: '', // e.g. 'Juniors (4-5)-Boys'
-    p1Id: '',
-    p2Id: ''
+    playerCount: 2, // Number of players to select
+    playerIds: [] // Array of selected player IDs
   });
 
   // --- Persistence ---
   useEffect(() => {
+    localStorage.setItem('sports_games', JSON.stringify(games));
+    localStorage.setItem('sports_game_configs', JSON.stringify(gameConfigs));
     localStorage.setItem('sports_students', JSON.stringify(students));
     localStorage.setItem('sports_matches', JSON.stringify(matches));
-  }, [students, matches]);
+  }, [games, gameConfigs, students, matches]);
 
   // --- Logic & Handlers ---
+
+  const addGame = () => {
+    if (!newGameName.trim()) return;
+    if (games.includes(newGameName.trim())) {
+      alert('This game already exists!');
+      return;
+    }
+    setGames([...games, newGameName.trim()]);
+    setNewGameName('');
+  };
+
+  const removeGame = (gameName) => {
+    if (confirm(`Remove "${gameName}" from the games list?`)) {
+      setGames(games.filter(g => g !== gameName));
+    }
+  };
+
+  const resetGames = () => {
+    if (confirm('Reset to default games list?')) {
+      setGames(DEFAULT_GAMES);
+    }
+  };
+
+  const updateGamePlayerCount = (gameName, playerCount) => {
+    setGameConfigs({
+      ...gameConfigs,
+      [gameName]: playerCount
+    });
+  };
+
+  const getGamePlayerCount = (gameName) => {
+    return gameConfigs[gameName] || 2; // Default to 2 players (1v1)
+  };
+
+  const isGamePlayerCountFixed = (gameName) => {
+    // Games with fixed player counts that cannot be changed
+    const fixedGames = ['Carrom (1vs1)', 'Carrom (2vs2)'];
+    return fixedGames.includes(gameName);
+  };
 
   const handleStudentSubmit = () => {
     if (!regForm.name || !regForm.rollNumber || !regForm.fatherName || !regForm.classVal || !regForm.gender || regForm.sports.length === 0) return;
@@ -210,27 +271,42 @@ export default function App() {
   };
 
   const scheduleMatch = () => {
-    if (!scheduleForm.sport || !scheduleForm.p1Id || !scheduleForm.p2Id || scheduleForm.p1Id === scheduleForm.p2Id) return;
+    if (!scheduleForm.sport || scheduleForm.playerIds.length !== scheduleForm.playerCount) return;
 
     const newMatch = {
       id: Date.now().toString(),
       sport: scheduleForm.sport,
-      category: scheduleForm.category, // Stored for easier filtering later
-      p1Id: scheduleForm.p1Id,
-      p2Id: scheduleForm.p2Id,
+      category: scheduleForm.category,
+      playerIds: scheduleForm.playerIds,
       winnerId: null,
       status: 'scheduled',
       timestamp: new Date().toISOString()
     };
 
     setMatches([...matches, newMatch]);
-    setScheduleForm({ ...scheduleForm, p1Id: '', p2Id: '' }); // Keep sport/cat selected for quick entry
+    setScheduleForm({ sport: '', category: '', playerCount: 2, playerIds: [] });
   };
 
   const declareWinner = (matchId, winnerId) => {
     setMatches(matches.map(m =>
       m.id === matchId ? { ...m, winnerId, status: 'finished' } : m
     ));
+  };
+
+  const togglePlayerSelection = (playerId) => {
+    if (scheduleForm.playerIds.includes(playerId)) {
+      setScheduleForm({
+        ...scheduleForm,
+        playerIds: scheduleForm.playerIds.filter(id => id !== playerId)
+      });
+    } else {
+      if (scheduleForm.playerIds.length < scheduleForm.playerCount) {
+        setScheduleForm({
+          ...scheduleForm,
+          playerIds: [...scheduleForm.playerIds, playerId]
+        });
+      }
+    }
   };
 
   const deleteMatch = (id) => setMatches(matches.filter(m => m.id !== id));
@@ -316,8 +392,14 @@ export default function App() {
     const busyPlayerIds = new Set();
     matches.forEach(m => {
       if (m.sport === scheduleForm.sport) {
-        busyPlayerIds.add(m.p1Id);
-        busyPlayerIds.add(m.p2Id);
+        // Handle both old format (p1Id, p2Id) and new format (playerIds array)
+        if (m.playerIds && Array.isArray(m.playerIds)) {
+          m.playerIds.forEach(id => busyPlayerIds.add(id));
+        } else {
+          // Fallback for old format
+          if (m.p1Id) busyPlayerIds.add(m.p1Id);
+          if (m.p2Id) busyPlayerIds.add(m.p2Id);
+        }
       }
     });
 
@@ -347,6 +429,103 @@ export default function App() {
     return eligiblePlayers.filter(s => s.category === catName && s.gender === gender);
   }, [eligiblePlayers, scheduleForm.category]);
 
+
+  // --- Render Views ---
+
+  const renderAdmin = () => (
+    <div className="animate-in fade-in duration-500 space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold text-slate-800">Manage Games</h2>
+        <Button onClick={resetGames} variant="secondary" className="text-xs">
+          <RotateCcw size={14} /> Reset to Default
+        </Button>
+      </div>
+
+      <Card className="p-6 border-indigo-100 shadow-sm">
+        <h3 className="font-semibold text-slate-800 mb-4">Add New Game</h3>
+        <div className="flex gap-2">
+          <Input
+            value={newGameName}
+            onChange={e => setNewGameName(e.target.value)}
+            placeholder="e.g., Relay Race, Tug of War, etc."
+            onKeyPress={(e) => e.key === 'Enter' && addGame()}
+          />
+          <Button onClick={addGame} className="px-6">
+            <Plus size={16} /> Add
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="bg-slate-50 border-b border-slate-100 p-4">
+          <h3 className="font-semibold text-slate-800">Current Games List</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            {games.length} game{games.length !== 1 ? 's' : ''} available for registration
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+          {games.length === 0 ? (
+            <div className="col-span-full text-center py-8 text-slate-400">
+              <AlertCircle className="mx-auto mb-2" size={40} />
+              <p>No games added yet. Start by adding your first game!</p>
+            </div>
+          ) : (
+            games.map(game => (
+              <div key={game} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors">
+                <div className="flex-1">
+                  <span className="font-medium text-slate-800">{game}</span>
+                  <div className="text-xs text-slate-500 mt-1">Players per match: <span className="font-bold text-indigo-600">{getGamePlayerCount(game)}</span></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => updateGamePlayerCount(game, Math.max(2, getGamePlayerCount(game) - 1))}
+                      className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
+                      title="Decrease players"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      min="2"
+                      max="20"
+                      value={getGamePlayerCount(game)}
+                      onChange={(e) => updateGamePlayerCount(game, Math.max(2, parseInt(e.target.value) || 2))}
+                      className="w-12 px-2 py-1 text-xs text-center border border-slate-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200"
+                    />
+                    <button
+                      onClick={() => updateGamePlayerCount(game, Math.min(20, getGamePlayerCount(game) + 1))}
+                      className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
+                      title="Increase players"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => removeGame(game)}
+                    className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
+                    title="Remove Game"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+
+      <Card className="p-4 bg-blue-50 border-blue-100 border">
+        <div className="flex gap-3">
+          <CheckCircle2 size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-blue-800">
+            <p className="font-semibold mb-1">Games will appear in Registration Form</p>
+            <p className="text-blue-700">Any game you add or remove here will automatically be updated in the student registration form and match scheduling options.</p>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
 
   // --- Render Views ---
 
@@ -621,16 +800,16 @@ export default function App() {
             </span>
           </label>
           <div className="grid grid-cols-2 gap-2">
-            {AVAILABLE_SPORTS.map(sport => (
+            {games.map(game => (
               <button
-                key={sport}
-                onClick={() => toggleSportSelection(sport)}
-                className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all text-left ${regForm.sports.includes(sport)
+                key={game}
+                onClick={() => toggleSportSelection(game)}
+                className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all text-left ${regForm.sports.includes(game)
                   ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm'
                   : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
                   }`}
               >
-                {sport}
+                {game}
               </button>
             ))}
           </div>
@@ -778,7 +957,7 @@ export default function App() {
             <Select
               value={filters.sport}
               onChange={e => setFilters({ ...filters, sport: e.target.value })}
-              options={AVAILABLE_SPORTS.map(s => ({ value: s, label: s }))}
+              options={games.map(s => ({ value: s, label: s }))}
               placeholder="All Sports"
             />
           </div>
@@ -850,20 +1029,52 @@ export default function App() {
                 <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">1. Select Sport</label>
                 <Select
                   value={scheduleForm.sport}
-                  onChange={e => setScheduleForm({ ...scheduleForm, sport: e.target.value, category: '', p1Id: '', p2Id: '' })}
-                  options={AVAILABLE_SPORTS.map(s => ({ value: s, label: s }))}
+                  onChange={e => setScheduleForm({ sport: e.target.value, category: '', playerCount: getGamePlayerCount(e.target.value), playerIds: [] })}
+                  options={games.map(s => ({ value: s, label: s }))}
                   placeholder="Choose Sport..."
                 />
               </div>
 
-              {/* Step 2: Select Category (Dynamic) */}
+              {/* Step 2: Select Number of Players */}
               {scheduleForm.sport && (
                 <div className="animate-in slide-in-from-left-4 fade-in duration-300">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">2. Select Category</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">2. Number of Players</label>
+                  {isGamePlayerCountFixed(scheduleForm.sport) ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="text-sm font-bold text-amber-900">{getGamePlayerCount(scheduleForm.sport)} Players (Fixed)</div>
+                      <p className="text-xs text-amber-700 mt-1">This game has a fixed player count and cannot be changed.</p>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Select
+                        value={scheduleForm.playerCount.toString()}
+                        onChange={e => setScheduleForm({ ...scheduleForm, playerCount: parseInt(e.target.value), playerIds: [] })}
+                        options={Array.from({ length: 19 }, (_, i) => i + 2).map(n => ({ value: n.toString(), label: `${n} Players` }))}
+                        placeholder="Select..."
+                      />
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500 mt-2">Admin default: {getGamePlayerCount(scheduleForm.sport)} players</p>
+                </div>
+              )}
+
+              {/* Players Required Info */}
+              {scheduleForm.sport && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg animate-in slide-in-from-left-4 fade-in duration-300">
+                  <div className="text-xs font-semibold text-blue-900">Players to Select</div>
+                  <div className="text-lg font-bold text-blue-600 mt-1">{scheduleForm.playerCount} Player{scheduleForm.playerCount !== 1 ? 's' : ''}</div>
+                  <div className="text-xs text-blue-700 mt-1">Select exactly {scheduleForm.playerCount} player{scheduleForm.playerCount !== 1 ? 's' : ''} to schedule this match</div>
+                </div>
+              )}
+
+              {/* Step 3: Select Category (Dynamic) */}
+              {scheduleForm.sport && (
+                <div className="animate-in slide-in-from-left-4 fade-in duration-300">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">3. Select Category</label>
                   {availableCategoriesForSport.length > 0 ? (
                     <Select
                       value={scheduleForm.category}
-                      onChange={e => setScheduleForm({ ...scheduleForm, category: e.target.value, p1Id: '', p2Id: '' })}
+                      onChange={e => setScheduleForm({ ...scheduleForm, category: e.target.value, playerIds: [] })}
                       options={availableCategoriesForSport.map(c => ({ value: c, label: c }))}
                       placeholder="Choose Group..."
                     />
@@ -876,32 +1087,47 @@ export default function App() {
                 </div>
               )}
 
-              {/* Step 3: Select Players */}
+              {/* Step 4: Select Players */}
               {scheduleForm.category && (
                 <div className="space-y-3 animate-in slide-in-from-left-4 fade-in duration-300">
-                  <div className="p-3 bg-white rounded-lg border border-slate-200">
-                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Player 1</label>
-                    <Select
-                      value={scheduleForm.p1Id}
-                      onChange={e => setScheduleForm({ ...scheduleForm, p1Id: e.target.value })}
-                      options={filteredPlayersForMatch.map(p => ({ value: p.id, label: p.name }))}
-                      placeholder="Select Player..."
-                    />
-                  </div>
-                  <div className="flex justify-center -my-5 relative z-10">
-                    <span className="bg-slate-200 text-slate-600 text-xs font-bold px-2 py-1 rounded-full border border-white">VS</span>
-                  </div>
-                  <div className="p-3 bg-white rounded-lg border border-slate-200">
-                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Player 2</label>
-                    <Select
-                      value={scheduleForm.p2Id}
-                      onChange={e => setScheduleForm({ ...scheduleForm, p2Id: e.target.value })}
-                      options={filteredPlayersForMatch.filter(p => p.id !== scheduleForm.p1Id).map(p => ({ value: p.id, label: p.name }))}
-                      placeholder="Select Player..."
-                    />
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">
+                      4. Select Players
+                      <span className={`ml-2 px-2 py-0.5 rounded text-xs font-bold ${scheduleForm.playerIds.length === scheduleForm.playerCount ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {scheduleForm.playerIds.length}/{scheduleForm.playerCount}
+                      </span>
+                    </label>
+                    <div className="space-y-2 max-h-80 overflow-y-auto">
+                      {filteredPlayersForMatch.map(player => (
+                        <button
+                          key={player.id}
+                          onClick={() => togglePlayerSelection(player.id)}
+                          className={`w-full text-left p-2 rounded-lg border transition-all text-sm ${
+                            scheduleForm.playerIds.includes(player.id)
+                              ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-semibold shadow-sm'
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-300'
+                          }`}
+                          disabled={!scheduleForm.playerIds.includes(player.id) && scheduleForm.playerIds.length >= scheduleForm.playerCount}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>{player.name}</span>
+                            <span className="text-xs text-slate-500">Class {player.classVal}</span>
+                          </div>
+                        </button>
+                      ))}
+                      {filteredPlayersForMatch.length === 0 && (
+                        <div className="text-center py-8 text-slate-400">
+                          <p>No eligible players in this category.</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <Button onClick={scheduleMatch} className="w-full mt-4">
+                  <Button 
+                    onClick={scheduleMatch} 
+                    className="w-full mt-4"
+                    disabled={scheduleForm.playerIds.length !== scheduleForm.playerCount}
+                  >
                     Create Match
                   </Button>
                 </div>
@@ -928,29 +1154,40 @@ export default function App() {
             )}
 
             {matches.filter(m => m.status === 'scheduled').map(match => {
-              const p1 = students.find(s => s.id === match.p1Id);
-              const p2 = students.find(s => s.id === match.p2Id);
-              if (!p1 || !p2) return null;
+              const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
+              if (matchPlayers.length === 0) return null;
 
               return (
                 <Card key={match.id} className="p-4 border-l-4 border-l-indigo-500 hover:shadow-md transition-shadow">
-                  <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div className="flex-1 w-full">
-                      <div className="text-xs font-bold text-indigo-600 uppercase mb-1">{match.sport} • {match.category}</div>
-                      <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <span className="font-bold text-slate-800">{p1.name}</span>
-                        <span className="text-slate-400 text-xs font-bold px-2">VS</span>
-                        <span className="font-bold text-slate-800">{p2.name}</span>
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <div className="text-xs font-bold text-indigo-600 uppercase mb-2">{match.sport} • {match.category}</div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div className="text-xs text-slate-500 mb-2 font-semibold">Players ({matchPlayers.length}):</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {matchPlayers.map((player, idx) => (
+                            <div key={player.id} className="flex items-center gap-2">
+                              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">
+                                {idx + 1}
+                              </span>
+                              <span className="font-bold text-slate-800">{player.name}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex gap-2 w-full md:w-auto">
-                      <Button onClick={() => declareWinner(match.id, p1.id)} className="flex-1 md:flex-none text-xs" variant="outline">
-                        {p1.name} Won
-                      </Button>
-                      <Button onClick={() => declareWinner(match.id, p2.id)} className="flex-1 md:flex-none text-xs" variant="outline">
-                        {p2.name} Won
-                      </Button>
+                    <div className="flex flex-wrap gap-2">
+                      {matchPlayers.map(player => (
+                        <Button 
+                          key={player.id} 
+                          onClick={() => declareWinner(match.id, player.id)} 
+                          className="flex-1 text-xs" 
+                          variant="outline"
+                        >
+                          {player.name} Won
+                        </Button>
+                      ))}
                       <button onClick={() => deleteMatch(match.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded">
                         <Trash2 size={16} />
                       </button>
@@ -967,22 +1204,24 @@ export default function App() {
               <h3 className="font-bold text-slate-700 mb-4">Completed Matches</h3>
               <div className="grid gap-3 opacity-75">
                 {matches.filter(m => m.status === 'finished').reverse().map(match => {
-                  const p1 = students.find(s => s.id === match.p1Id);
-                  const p2 = students.find(s => s.id === match.p2Id);
+                  const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
                   const winner = students.find(s => s.id === match.winnerId);
-                  if (!p1 || !p2) return null;
+                  if (matchPlayers.length === 0) return null;
 
                   return (
                     <div key={match.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center">
                       <div>
                         <div className="text-xs font-semibold text-slate-500">{match.sport}</div>
-                        <div className="text-sm">
-                          <span className={match.winnerId === p1.id ? "font-bold text-emerald-600" : "text-slate-500"}>{p1.name}</span>
-                          <span className="mx-2 text-slate-300">vs</span>
-                          <span className={match.winnerId === p2.id ? "font-bold text-emerald-600" : "text-slate-500"}>{p2.name}</span>
+                        <div className="text-sm flex flex-wrap gap-1">
+                          {matchPlayers.map((player, idx) => (
+                            <span key={player.id} className={match.winnerId === player.id ? "font-bold text-emerald-600" : "text-slate-500"}>
+                              {idx > 0 && <span className="mx-1 text-slate-300">•</span>}
+                              {player.name}
+                            </span>
+                          ))}
                         </div>
                       </div>
-                      <Badge color="green">Winner: {winner?.name}</Badge>
+                      {winner && <Badge color="green">Winner: {winner.name}</Badge>}
                     </div>
                   );
                 })}
@@ -1013,9 +1252,9 @@ export default function App() {
             </div>
           ) : (
             winners.map(match => {
+              const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
               const winner = students.find(s => s.id === match.winnerId);
-              const loser = students.find(s => s.id === (match.winnerId === match.p1Id ? match.p2Id : match.p1Id));
-              if (!winner) return null;
+              if (!winner || matchPlayers.length === 0) return null;
 
               return (
                 <Card key={match.id} className="p-4 flex items-center gap-4 hover:shadow-md transition-shadow border-l-4 border-l-amber-400">
@@ -1026,12 +1265,14 @@ export default function App() {
                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">{match.sport}</div>
                     <div className="text-xs text-indigo-500 font-semibold mb-1">{match.category}</div>
                     <div className="font-bold text-slate-800 text-lg">{winner.name}</div>
-                    <div className="text-xs text-slate-500">Defeated {loser?.name}</div>
+                    <div className="text-xs text-slate-500">
+                      Competed with {matchPlayers.filter(p => p.id !== winner.id).map(p => p.name).join(', ')}
+                    </div>
                   </div>
                 </Card>
               );
             })
-          )}
+          )}}
         </div>
       </div>
     );
@@ -1053,6 +1294,7 @@ export default function App() {
         {/* Navigation Tabs */}
         <div className="max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto no-scrollbar">
           {[
+            { id: 'admin', label: 'Admin', icon: Settings },
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'participants', label: 'Participants', icon: Table2 },
             { id: 'filter', label: 'Filter', icon: Filter },
@@ -1077,6 +1319,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {activeTab === 'admin' && renderAdmin()}
         {activeTab === 'dashboard' && renderDashboard()}
         {activeTab === 'participants' && renderParticipants()}
         {activeTab === 'filter' && renderFilters()}
