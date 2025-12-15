@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Users, Calendar, Plus, Trash2, Save, X,
   Medal, Activity, LayoutDashboard, UserPlus,
-  ChevronRight, CheckCircle2, AlertCircle, Pencil, Table2, Filter, Camera, RotateCcw, Settings
+  ChevronRight, CheckCircle2, AlertCircle, Pencil, Table2, Filter, Camera, RotateCcw, Settings, Zap
 } from 'lucide-react';
 
 // --- UI Components ---
@@ -91,6 +91,12 @@ const DEFAULT_GAMES = [
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
+  // --- User Role State ---
+  const [userRole, setUserRole] = useState(() => {
+    const saved = localStorage.getItem('sports_user_role');
+    return saved || 'admin'; // default to admin
+  });
+
   // --- State ---
 
   const [games, setGames] = useState(() => {
@@ -135,6 +141,12 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null);
 
+  // Student Profile Detail View
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
+
+  // Image Preview State
+  const [previewImage, setPreviewImage] = useState(null);
+
   // Camera State
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef(null);
@@ -147,6 +159,9 @@ export default function App() {
     classVal: '',
     sport: ''
   });
+
+  // Search State
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Match Schedule State
   const [scheduleForm, setScheduleForm] = useState({
@@ -162,7 +177,8 @@ export default function App() {
     localStorage.setItem('sports_game_configs', JSON.stringify(gameConfigs));
     localStorage.setItem('sports_students', JSON.stringify(students));
     localStorage.setItem('sports_matches', JSON.stringify(matches));
-  }, [games, gameConfigs, students, matches]);
+    localStorage.setItem('sports_user_role', userRole);
+  }, [games, gameConfigs, students, matches, userRole]);
 
   // --- Logic & Handlers ---
 
@@ -222,6 +238,8 @@ export default function App() {
     if (editingId) {
       // Update existing
       setStudents(students.map(s => s.id === editingId ? { ...s, ...studentData } : s));
+      // Keep the profile modal open to show updated data
+      setSelectedStudentId(editingId);
       setEditingId(null);
     } else {
       // Create new
@@ -230,6 +248,7 @@ export default function App() {
         ...studentData
       };
       setStudents([...students, newStudent]);
+      setSelectedStudentId(newStudent.id);
     }
 
     setRegForm({ name: '', rollNumber: '', fatherName: '', photo: '', classVal: '', gender: '', sports: [] });
@@ -288,9 +307,19 @@ export default function App() {
   };
 
   const declareWinner = (matchId, winnerId) => {
-    setMatches(matches.map(m =>
-      m.id === matchId ? { ...m, winnerId, status: 'finished' } : m
-    ));
+    setMatches(matches.map(m => {
+      if (m.id === matchId) {
+        // For Carrom (2vs2), winnerId should be an array of 2 player IDs
+        // For other games, winnerId is a single player ID
+        const isTeamGame = m.sport === 'Carrom (2vs2)';
+        return {
+          ...m,
+          winnerId: isTeamGame ? (Array.isArray(winnerId) ? winnerId : [winnerId]) : winnerId,
+          status: 'finished'
+        };
+      }
+      return m;
+    }));
   };
 
   const togglePlayerSelection = (playerId) => {
@@ -366,9 +395,9 @@ export default function App() {
       matchesPending: matches.filter(m => m.status === 'scheduled').length,
       matchesFinished: matches.filter(m => m.status === 'finished').length,
       byCategory: {
-        juniors: students.filter(s => s.category.includes('Juniors')).length,
+        juniors: students.filter(s => s.category.includes('Junior')).length,
         middle: students.filter(s => s.category.includes('Middle')).length,
-        seniors: students.filter(s => s.category.includes('Seniors')).length,
+        seniors: students.filter(s => s.category.includes('Senior')).length,
       }
     };
   }, [students, matches]);
@@ -380,9 +409,18 @@ export default function App() {
       const matchGender = filters.gender ? student.gender === filters.gender : true;
       const matchClass = filters.classVal ? student.classVal.toString() === filters.classVal : true;
       const matchSport = filters.sport ? student.sports.includes(filters.sport) : true;
-      return matchCategory && matchGender && matchClass && matchSport;
+      
+      // Search filter - search by name, roll number, or father's name
+      const searchLower = searchTerm.toLowerCase();
+      const matchSearch = searchTerm ? 
+        student.name.toLowerCase().includes(searchLower) ||
+        student.rollNumber.toLowerCase().includes(searchLower) ||
+        student.fatherName.toLowerCase().includes(searchLower)
+        : true;
+      
+      return matchCategory && matchGender && matchClass && matchSport && matchSearch;
     });
-  }, [students, filters]);
+  }, [students, filters, searchTerm]);
 
   // Filtering Logic for Scheduler
   const eligiblePlayers = useMemo(() => {
@@ -422,6 +460,83 @@ export default function App() {
     });
     return Array.from(cats).sort();
   }, [eligiblePlayers, scheduleForm.sport]);
+
+  const autoScheduleAllMatches = () => {
+    // Only schedule if a sport is selected
+    if (!scheduleForm.sport) {
+      alert('Please select a sport first');
+      return;
+    }
+
+    const newMatches = [];
+    const selectedSport = scheduleForm.sport;
+    const playerCount = getGamePlayerCount(selectedSport);
+    
+    // Group eligible players by the selected sport and category
+    const matchGroups = {};
+    
+    eligiblePlayers.forEach(player => {
+      const playerData = students.find(s => s.id === player.id);
+      if (!playerData) return;
+      
+      // Only include players who have registered for the selected sport
+      if (!playerData.sports.includes(selectedSport)) return;
+      
+      const category = `${player.category} - ${player.gender}`;
+      const groupKey = `${selectedSport}|${category}`;
+      
+      if (!matchGroups[groupKey]) {
+        matchGroups[groupKey] = [];
+      }
+      
+      // Add player only once
+      if (!matchGroups[groupKey].includes(player.id)) {
+        matchGroups[groupKey].push(player.id);
+      }
+    });
+
+    // Create one round of matches for each category group
+    Object.entries(matchGroups).forEach(([groupKey, playerIds]) => {
+      if (playerIds.length < playerCount) return; // Need minimum players
+      
+      const [sport, category] = groupKey.split('|');
+      
+      // Shuffle players randomly
+      const shuffled = [...playerIds].sort(() => Math.random() - 0.5);
+      
+      // Create only ONE round of matches (first batch of shuffled players)
+      // Each player appears in at most one match for this sport-category
+      for (let i = 0; i + playerCount <= shuffled.length; i += playerCount) {
+        const matchPlayerIds = shuffled.slice(i, i + playerCount);
+        
+        // Check if match already exists
+        const matchExists = matches.some(m => 
+          m.sport === sport && 
+          m.category === category &&
+          m.status === 'scheduled' &&
+          JSON.stringify(m.playerIds.sort()) === JSON.stringify(matchPlayerIds.sort())
+        );
+        
+        if (!matchExists && matchPlayerIds.length === playerCount) {
+          newMatches.push({
+            id: Date.now().toString() + Math.random(),
+            sport: sport,
+            category: category,
+            playerIds: matchPlayerIds,
+            winnerId: null,
+            status: 'scheduled',
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+    });
+
+    if (newMatches.length > 0) {
+      setMatches([...matches, ...newMatches]);
+    } else {
+      alert('No eligible students found to schedule matches for this sport');
+    }
+  };
 
   const filteredPlayersForMatch = useMemo(() => {
     if (!scheduleForm.category) return [];
@@ -565,7 +680,7 @@ export default function App() {
           </h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-slate-600 text-sm font-medium">Juniors (Class 4-5)</span>
+              <span className="text-slate-600 text-sm font-medium">Junior (Class 1-3)</span>
               <div className="flex items-center gap-2">
                 <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-400" style={{ width: `${(stats.byCategory.juniors / (stats.totalStudents || 1)) * 100}%` }}></div>
@@ -574,7 +689,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-600 text-sm font-medium">Middle (Class 6-7)</span>
+              <span className="text-slate-600 text-sm font-medium">Middle (Class 4-6)</span>
               <div className="flex items-center gap-2">
                 <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div className="h-full bg-indigo-400" style={{ width: `${(stats.byCategory.middle / (stats.totalStudents || 1)) * 100}%` }}></div>
@@ -583,7 +698,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-600 text-sm font-medium">Seniors (Class 8-10)</span>
+              <span className="text-slate-600 text-sm font-medium">Senior (Class 7-10)</span>
               <div className="flex items-center gap-2">
                 <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div className="h-full bg-purple-400" style={{ width: `${(stats.byCategory.seniors / (stats.totalStudents || 1)) * 100}%` }}></div>
@@ -601,14 +716,23 @@ export default function App() {
           </h3>
           <div className="space-y-3">
             {matches.filter(m => m.status === 'finished').slice(-4).reverse().map(match => {
-              const winner = students.find(s => s.id === match.winnerId);
+              let winnerDisplay = '';
+              if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
+                // For team games, show both winners
+                const winners = students.filter(s => match.winnerId.includes(s.id));
+                winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
+              } else {
+                // For individual games, show single winner
+                const winner = students.find(s => s.id === match.winnerId);
+                winnerDisplay = winner?.name || 'Unknown';
+              }
               return (
                 <div key={match.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                   <div>
-                    <div className="font-bold text-slate-800 text-sm">{winner?.name || 'Unknown'}</div>
+                    <div className="font-bold text-slate-800 text-sm">{winnerDisplay}</div>
                     <div className="text-xs text-slate-500">{match.sport} • {match.category}</div>
                   </div>
-                  <Badge color="orange">Winner</Badge>
+                  <Badge color="orange">Winner{match.sport === 'Carrom (2vs2)' ? 's' : ''}</Badge>
                 </div>
               );
             })}
@@ -834,52 +958,151 @@ export default function App() {
   );
 
   const renderParticipants = () => (
-    <div className="animate-in fade-in duration-500 space-y-4">
+    <div className="animate-in fade-in duration-500 space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold text-slate-800">All Participants</h2>
-        <Button onClick={() => setActiveTab('register')} variant="secondary">
-          <Plus size={16} /> Add New
-        </Button>
+        <h2 className="text-xl font-bold text-slate-800">Participants</h2>
+        <div className="flex gap-2">
+          {userRole === 'admin' && (
+            <Button onClick={() => setActiveTab('register')} variant="secondary">
+              <Plus size={16} /> Add New
+            </Button>
+          )}
+          <Button onClick={resetFilters} variant="secondary" className="text-xs">
+            <X size={14} /> Reset Filters
+          </Button>
+        </div>
       </div>
 
+      {/* Search Section */}
+      <Card className="p-4 bg-indigo-50 border-indigo-100 shadow-sm">
+        <Input
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+          placeholder="Search by name, roll number, or father's name..."
+          className="w-full"
+        />
+      </Card>
+
+      {/* Filter Section */}
+      <Card className="p-6 border-indigo-100 shadow-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Category</label>
+            <Select
+              value={filters.category}
+              onChange={e => setFilters({ ...filters, category: e.target.value })}
+              options={[
+                { value: 'Junior (1-3)', label: 'Junior (1-3)' },
+                { value: 'Middle (4-6)', label: 'Middle (4-6)' },
+                { value: 'Senior (7-10)', label: 'Senior (7-10)' }
+              ]}
+              placeholder="All Categories"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Gender</label>
+            <Select
+              value={filters.gender}
+              onChange={e => setFilters({ ...filters, gender: e.target.value })}
+              options={[
+                { value: 'Boys', label: 'Boys' },
+                { value: 'Girls', label: 'Girls' }
+              ]}
+              placeholder="All Genders"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Class</label>
+            <Select
+              value={filters.classVal}
+              onChange={e => setFilters({ ...filters, classVal: e.target.value })}
+              options={Array.from({ length: 7 }, (_, i) => i + 4).map(c => ({ value: c.toString(), label: `Class ${c}` }))}
+              placeholder="All Classes"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Sport</label>
+            <Select
+              value={filters.sport}
+              onChange={e => setFilters({ ...filters, sport: e.target.value })}
+              options={games.map(s => ({ value: s, label: s }))}
+              placeholder="All Sports"
+            />
+          </div>
+        </div>
+      </Card>
+
+      <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+        <CheckCircle2 size={16} className="text-emerald-500" />
+        Found <strong>{filteredStudentsList.length}</strong> matching participants
+      </div>
+
+      {/* Participants Table */}
       <Card className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="bg-slate-50 text-slate-500 border-b border-slate-100">
+              <th className="p-4 font-semibold">Roll No</th>
+              <th className="p-4 font-semibold">Photo</th>
               <th className="p-4 font-semibold">Name</th>
+              <th className="p-4 font-semibold">Class</th>
               <th className="p-4 font-semibold">Category</th>
               <th className="p-4 font-semibold">Gender</th>
               <th className="p-4 font-semibold">Sports</th>
+              <th className="p-4 font-semibold">Father's Name</th>
               <th className="p-4 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {students.length === 0 ? (
+            {filteredStudentsList.length === 0 ? (
               <tr>
-                <td colSpan="5" className="p-8 text-center text-slate-400">
-                  No students found.
+                <td colSpan="9" className="p-8 text-center text-slate-400">
+                  No participants match your filters.
                 </td>
               </tr>
             ) : (
-              [...students].reverse().map(student => (
+              filteredStudentsList.map(student => (
                 <tr key={student.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-4 font-bold text-slate-800">{student.rollNumber}</td>
                   <td className="p-4">
-                    <div className="font-bold text-slate-800">{student.name}</div>
-                    <div className="text-xs text-slate-400">Class {student.classVal}</div>
+                    {student.photo ? (
+                      <button
+                        onClick={() => setPreviewImage(student.photo)}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                      >
+                        <img 
+                          src={student.photo} 
+                          alt={student.name}
+                          className="w-10 h-10 rounded-full object-cover border border-indigo-200"
+                        />
+                      </button>
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center border border-slate-300">
+                        <Users size={16} className="text-slate-400" />
+                      </div>
+                    )}
                   </td>
-                  <td className="p-4">
-                    <Badge color="slate">{student.category}</Badge>
+                  <td className="p-4 font-bold text-slate-800">
+                    <button 
+                      onClick={() => setSelectedStudentId(student.id)}
+                      className="text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer transition-colors"
+                    >
+                      {student.name}
+                    </button>
                   </td>
+                  <td className="p-4 text-slate-600">{student.classVal}</td>
+                  <td className="p-4"><Badge color="slate">{student.category}</Badge></td>
                   <td className="p-4 text-slate-600">{student.gender}</td>
                   <td className="p-4">
                     <div className="flex flex-wrap gap-1">
                       {student.sports.map(s => (
-                        <span key={s} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-xs border border-slate-200">
+                        <span key={s} className={`px-1.5 py-0.5 rounded text-xs border ${filters.sport === s ? 'bg-indigo-100 text-indigo-700 border-indigo-200 font-bold' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                           {s}
                         </span>
                       ))}
                     </div>
                   </td>
+                  <td className="p-4 text-slate-600 text-xs">{student.fatherName}</td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button
@@ -904,6 +1127,137 @@ export default function App() {
           </tbody>
         </table>
       </Card>
+
+      {/* Student Detail Modal */}
+      {selectedStudentId && (() => {
+        const student = students.find(s => s.id === selectedStudentId);
+        if (!student) return null;
+        
+        const matchesForStudent = matches.filter(m => m.playerIds && m.playerIds.includes(student.id));
+        
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <Card className="max-w-2xl w-full">
+              <div className="p-6">
+                <div className="flex justify-between items-start mb-6">
+                  <h2 className="text-2xl font-bold text-slate-800">Student Profile</h2>
+                  <button 
+                    onClick={() => setSelectedStudentId(null)}
+                    className="text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Photo Section */}
+                  <div className="flex flex-col items-center justify-center">
+                    {student.photo ? (
+                      <button
+                        onClick={() => setPreviewImage(student.photo)}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                      >
+                        <img 
+                          src={student.photo} 
+                          alt={student.name}
+                          className="w-40 h-40 rounded-full object-cover border-4 border-indigo-200 mb-4 hover:shadow-lg transition-shadow"
+                        />
+                      </button>
+                    ) : (
+                      <div className="w-40 h-40 rounded-full bg-slate-200 flex items-center justify-center border-4 border-slate-300 mb-4">
+                        <Users size={64} className="text-slate-400" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Information Section */}
+                  <div className="md:col-span-2 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Full Name</label>
+                        <p className="text-lg font-bold text-slate-800">{student.name}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Roll Number</label>
+                        <p className="text-lg font-bold text-slate-800">{student.rollNumber}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Class</label>
+                        <p className="text-lg font-bold text-slate-800">{student.classVal}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Category</label>
+                        <Badge color="indigo">{student.category}</Badge>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Gender</label>
+                        <p className="text-lg font-bold text-slate-800">{student.gender}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Father's Name</label>
+                        <p className="text-lg font-bold text-slate-800">{student.fatherName}</p>
+                      </div>
+                    </div>
+
+                    {/* Sports Section */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Registered Sports</label>
+                      <div className="flex flex-wrap gap-2">
+                        {student.sports.map(s => (
+                          <Badge key={s} color="indigo">{s}</Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Matches Section */}
+                    {matchesForStudent.length > 0 && (
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Matches Participated</label>
+                        <div className="space-y-2">
+                          {matchesForStudent.map(match => (
+                            <div key={match.id} className="p-2 bg-slate-50 rounded border border-slate-200 text-sm">
+                              <div className="font-semibold text-slate-700">{match.sport}</div>
+                              <div className="text-xs text-slate-500">{match.category} • {match.status === 'finished' ? '✓ Completed' : 'Scheduled'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-slate-200 flex gap-2">
+                  <Button onClick={() => { startEdit(student); setSelectedStudentId(null); }} variant="primary" className="flex-1">
+                    <Pencil size={16} /> Edit Profile
+                  </Button>
+                  <Button onClick={() => setSelectedStudentId(null)} variant="secondary" className="flex-1">
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="relative flex flex-col items-center">
+            <img 
+              src={previewImage} 
+              alt="Preview"
+              className="max-w-lg max-h-96 rounded-lg object-contain"
+            />
+            <button 
+              onClick={() => setPreviewImage(null)}
+              className="absolute top-2 right-2 bg-white rounded-full p-2 hover:bg-slate-200 transition-colors shadow-lg"
+            >
+              <X size={24} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1019,9 +1373,18 @@ export default function App() {
         {/* Scheduler Controls */}
         <div className="lg:col-span-1">
           <Card className="p-6 sticky top-24 border-indigo-100 shadow-md bg-slate-50">
-            <h3 className="font-bold text-lg text-slate-800 mb-4 flex items-center gap-2">
-              <Calendar size={20} className="text-indigo-600" /> Schedule Match
-            </h3>
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <Calendar size={20} className="text-indigo-600" /> Schedule Match
+              </h3>
+              <Button 
+                onClick={autoScheduleAllMatches}
+                className="text-xs h-8 px-2"
+                title="Auto-schedule all possible matches randomly"
+              >
+                Auto Schedule
+              </Button>
+            </div>
 
             <div className="space-y-4">
               {/* Step 1: Select Sport */}
@@ -1178,16 +1541,39 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      {matchPlayers.map(player => (
-                        <Button 
-                          key={player.id} 
-                          onClick={() => declareWinner(match.id, player.id)} 
-                          className="flex-1 text-xs" 
-                          variant="outline"
-                        >
-                          {player.name} Won
-                        </Button>
-                      ))}
+                      {match.sport === 'Carrom (2vs2)' ? (
+                        // For Carrom (2vs2), show pair selection buttons
+                        (() => {
+                          const pairs = [];
+                          for (let i = 0; i < matchPlayers.length; i += 2) {
+                            if (i + 1 < matchPlayers.length) {
+                              pairs.push([matchPlayers[i], matchPlayers[i + 1]]);
+                            }
+                          }
+                          return pairs.map((pair, pairIndex) => (
+                            <Button
+                              key={pairIndex}
+                              onClick={() => declareWinner(match.id, pair.map(p => p.id))}
+                              className="flex-1 text-xs"
+                              variant="outline"
+                            >
+                              {pair.map(p => p.name).join(' & ')} Won
+                            </Button>
+                          ));
+                        })()
+                      ) : (
+                        // For other games, show individual player buttons
+                        matchPlayers.map(player => (
+                          <Button
+                            key={player.id}
+                            onClick={() => declareWinner(match.id, player.id)}
+                            className="flex-1 text-xs"
+                            variant="outline"
+                          >
+                            {player.name} Won
+                          </Button>
+                        ))
+                      )}
                       <button onClick={() => deleteMatch(match.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded">
                         <Trash2 size={16} />
                       </button>
@@ -1205,7 +1591,21 @@ export default function App() {
               <div className="grid gap-3 opacity-75">
                 {matches.filter(m => m.status === 'finished').reverse().map(match => {
                   const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
-                  const winner = students.find(s => s.id === match.winnerId);
+                  let winnerDisplay = '';
+                  let winnerBadge = '';
+
+                  if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
+                    // For team games, show both winners
+                    const winners = students.filter(s => match.winnerId.includes(s.id));
+                    winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
+                    winnerBadge = `Winners: ${winnerDisplay}`;
+                  } else {
+                    // For individual games, show single winner
+                    const winner = students.find(s => s.id === match.winnerId);
+                    winnerDisplay = winner?.name || 'Unknown';
+                    winnerBadge = `Winner: ${winnerDisplay}`;
+                  }
+
                   if (matchPlayers.length === 0) return null;
 
                   return (
@@ -1213,15 +1613,20 @@ export default function App() {
                       <div>
                         <div className="text-xs font-semibold text-slate-500">{match.sport}</div>
                         <div className="text-sm flex flex-wrap gap-1">
-                          {matchPlayers.map((player, idx) => (
-                            <span key={player.id} className={match.winnerId === player.id ? "font-bold text-emerald-600" : "text-slate-500"}>
-                              {idx > 0 && <span className="mx-1 text-slate-300">•</span>}
-                              {player.name}
-                            </span>
-                          ))}
+                          {matchPlayers.map((player, idx) => {
+                            const isWinner = match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)
+                              ? match.winnerId.includes(player.id)
+                              : match.winnerId === player.id;
+                            return (
+                              <span key={player.id} className={isWinner ? "font-bold text-emerald-600" : "text-slate-500"}>
+                                {idx > 0 && <span className="mx-1 text-slate-300">•</span>}
+                                {player.name}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
-                      {winner && <Badge color="green">Winner: {winner.name}</Badge>}
+                      <Badge color="green">{winnerBadge}</Badge>
                     </div>
                   );
                 })}
@@ -1253,8 +1658,22 @@ export default function App() {
           ) : (
             winners.map(match => {
               const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
-              const winner = students.find(s => s.id === match.winnerId);
-              if (!winner || matchPlayers.length === 0) return null;
+              let winnerDisplay = '';
+              let competedWith = '';
+
+              if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
+                // For team games, show both winners
+                const winners = students.filter(s => match.winnerId.includes(s.id));
+                winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
+                competedWith = matchPlayers.filter(p => !match.winnerId.includes(p.id)).map(p => p.name).join(', ');
+              } else {
+                // For individual games, show single winner
+                const winner = students.find(s => s.id === match.winnerId);
+                winnerDisplay = winner?.name || 'Unknown';
+                competedWith = matchPlayers.filter(p => p.id !== match.winnerId).map(p => p.name).join(', ');
+              }
+
+              if (!winnerDisplay || matchPlayers.length === 0) return null;
 
               return (
                 <Card key={match.id} className="p-4 flex items-center gap-4 hover:shadow-md transition-shadow border-l-4 border-l-amber-400">
@@ -1264,21 +1683,155 @@ export default function App() {
                   <div className="flex-1">
                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">{match.sport}</div>
                     <div className="text-xs text-indigo-500 font-semibold mb-1">{match.category}</div>
-                    <div className="font-bold text-slate-800 text-lg">{winner.name}</div>
+                    <div className="font-bold text-slate-800 text-lg">{winnerDisplay}</div>
                     <div className="text-xs text-slate-500">
-                      Competed with {matchPlayers.filter(p => p.id !== winner.id).map(p => p.name).join(', ')}
+                      Competed with {competedWith}
                     </div>
                   </div>
                 </Card>
               );
             })
-          )}}
+          )}
         </div>
       </div>
     );
   };
 
+  const createDummyParticipants = (count) => {
+    const firstNames = ['Aarav', 'Anaya', 'Arjun', 'Aditi', 'Aditya', 'Anushka', 'Arnav', 'Avni', 'Abhishek', 'Avery', 'Bhavna', 'Bhavin', 'Chirag', 'Chitra', 'Deepak', 'Divya', 'Dharun', 'Dhruv', 'Esha', 'Eshaan', 'Farhan', 'Farah', 'Gaurav', 'Gauri', 'Hariom', 'Harshita', 'Ishaan', 'Ishita', 'Jatin', 'Jigyasa', 'Kabir', 'Kavya', 'Karan', 'Kayla', 'Lakshaay', 'Lakshmi', 'Manish', 'Manika', 'Nikhil', 'Nikita', 'Omkar', 'Olive', 'Pranav', 'Priya', 'Rohan', 'Rohini', 'Sahil', 'Sakshi', 'Tarun', 'Tanvi', 'Umang', 'Usha', 'Vansh', 'Vanshika', 'Waleed', 'Wanda', 'Xenith', 'Yash', 'Yara', 'Zara'];
+    const lastNames = ['Sharma', 'Singh', 'Patel', 'Gupta', 'Khan', 'Kumar', 'Yadav', 'Verma', 'Malhotra', 'Reddy', 'Desai', 'Joshi', 'Nair', 'Iyer', 'Kulkarni', 'Chopra', 'Bansal', 'Saxena', 'Tripathi', 'Pandey'];
+    const fatherFirstNames = ['Dr.', 'Mr.', 'Shri', 'Sri'];
+    const fatherLastNames = lastNames;
+    const genders = ['Boys', 'Girls'];
+
+    const dummyParticipants = [];
+    const usedRollNumbers = new Set(students.map(s => s.rollNumber));
+
+    for (let i = 0; i < count; i++) {
+      let rollNumber = Math.floor(Math.random() * 1000) + 1;
+      while (usedRollNumbers.has(rollNumber.toString())) {
+        rollNumber = Math.floor(Math.random() * 1000) + 1;
+      }
+      usedRollNumbers.add(rollNumber.toString());
+
+      const classVal = Math.floor(Math.random() * 7) + 4; // Classes 4-10
+      const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+      const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+      const gender = genders[Math.floor(Math.random() * genders.length)];
+      const fatherName = `${fatherFirstNames[Math.floor(Math.random() * fatherFirstNames.length)]} ${lastName}`;
+      
+      const sports = [];
+      const sportsCount = Math.floor(Math.random() * 3) + 1; // 1-3 sports
+      const availableSports = [...games];
+      for (let j = 0; j < sportsCount; j++) {
+        const sportIndex = Math.floor(Math.random() * availableSports.length);
+        sports.push(availableSports[sportIndex]);
+        availableSports.splice(sportIndex, 1);
+      }
+
+      dummyParticipants.push({
+        id: Date.now().toString() + Math.random(),
+        name: `${firstName} ${lastName}`,
+        rollNumber: rollNumber.toString(),
+        fatherName: fatherName,
+        photo: '',
+        classVal: classVal,
+        gender: gender,
+        category: getCategory(classVal),
+        sports: sports
+      });
+    }
+
+    setStudents([...students, ...dummyParticipants]);
+  };
+
+  const renderDummyParticipants = () => (
+    <div className="animate-in fade-in duration-500 space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-slate-800 mb-4">Generate Dummy Participants</h2>
+        <p className="text-sm text-slate-600 mb-6">Create test participants to populate your sports management system with sample data.</p>
+      </div>
+
+      <Card className="p-6 border-indigo-100 shadow-sm">
+        <h3 className="font-semibold text-slate-800 mb-4">Quick Generate Options</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Button 
+            onClick={() => createDummyParticipants(10)}
+            className="h-20 flex flex-col items-center justify-center gap-2 text-center"
+          >
+            <span className="text-2xl font-bold">10</span>
+            <span className="text-xs">Participants</span>
+          </Button>
+          <Button 
+            onClick={() => createDummyParticipants(25)}
+            className="h-20 flex flex-col items-center justify-center gap-2 text-center"
+          >
+            <span className="text-2xl font-bold">25</span>
+            <span className="text-xs">Participants</span>
+          </Button>
+          <Button 
+            onClick={() => createDummyParticipants(50)}
+            className="h-20 flex flex-col items-center justify-center gap-2 text-center"
+          >
+            <span className="text-2xl font-bold">50</span>
+            <span className="text-xs">Participants</span>
+          </Button>
+          <Button 
+            onClick={() => createDummyParticipants(100)}
+            className="h-20 flex flex-col items-center justify-center gap-2 text-center"
+          >
+            <span className="text-2xl font-bold">100</span>
+            <span className="text-xs">Participants</span>
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="p-6 border-amber-100 bg-amber-50 shadow-sm">
+        <h3 className="font-semibold text-amber-900 mb-2 flex items-center gap-2">
+          <AlertCircle size={18} /> About Dummy Data
+        </h3>
+        <ul className="text-sm text-amber-800 space-y-2 ml-6 list-disc">
+          <li>Each participant is assigned random classes (4-10), genders, and sports</li>
+          <li>Roll numbers are auto-generated and won't duplicate with existing students</li>
+          <li>Participants are distributed across Junior, Middle, and Senior categories</li>
+          <li>You can generate multiple batches - they'll be added to your existing participants</li>
+          <li>All data is stored in your browser's storage</li>
+        </ul>
+      </Card>
+
+      <div className="text-center text-sm text-slate-600 p-6 bg-white rounded-lg border border-slate-200">
+        <p>Total participants: <span className="font-bold text-indigo-600">{students.length}</span></p>
+      </div>
+    </div>
+  );
+
   // --- Main Layout ---
+
+  // Define tabs based on role
+  const getTabs = () => {
+    const baseTabs = [
+      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'participants', label: 'Participants', icon: Table2 },
+      { id: 'scheduler', label: 'Competition', icon: Calendar },
+      { id: 'results', label: 'Results', icon: Medal },
+    ];
+
+    // Admin gets all tabs
+    if (userRole === 'admin') {
+      return [
+        { id: 'admin', label: 'Admin', icon: Settings },
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'participants', label: 'Participants', icon: Table2 },
+        { id: 'register', label: 'Registration', icon: UserPlus },
+        { id: 'dummy', label: 'Dummy Data', icon: Zap },
+        { id: 'scheduler', label: 'Competition', icon: Calendar },
+        { id: 'results', label: 'Results', icon: Medal },
+      ];
+    }
+
+    // Teachers get dashboard, participants, competition, and results
+    return baseTabs;
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20">
@@ -1288,20 +1841,23 @@ export default function App() {
           <div className="flex items-center gap-2">
             <Activity size={24} className="text-indigo-200" />
             <h1 className="font-bold text-xl tracking-tight">Sports Manager</h1>
+            <div className="ml-4 flex items-center gap-2">
+              <span className="text-xs font-semibold text-indigo-100">Role:</span>
+              <select
+                value={userRole}
+                onChange={e => setUserRole(e.target.value)}
+                className="px-2 py-1 rounded bg-indigo-500 text-white text-xs font-semibold hover:bg-indigo-400 transition-colors cursor-pointer"
+              >
+                <option value="admin">👤 Admin</option>
+                <option value="teacher">👨‍🏫 Teacher</option>
+              </select>
+            </div>
           </div>
         </div>
 
         {/* Navigation Tabs */}
         <div className="max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto no-scrollbar">
-          {[
-            { id: 'admin', label: 'Admin', icon: Settings },
-            { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { id: 'participants', label: 'Participants', icon: Table2 },
-            { id: 'filter', label: 'Filter', icon: Filter },
-            { id: 'register', label: 'Registration', icon: UserPlus },
-            { id: 'scheduler', label: 'Competition', icon: Calendar },
-            { id: 'results', label: 'Results', icon: Medal },
-          ].map(tab => (
+          {getTabs().map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -1322,8 +1878,8 @@ export default function App() {
         {activeTab === 'admin' && renderAdmin()}
         {activeTab === 'dashboard' && renderDashboard()}
         {activeTab === 'participants' && renderParticipants()}
-        {activeTab === 'filter' && renderFilters()}
         {activeTab === 'register' && renderRegistration()}
+        {activeTab === 'dummy' && renderDummyParticipants()}
         {activeTab === 'scheduler' && renderScheduler()}
         {activeTab === 'results' && renderResults()}
       </main>
