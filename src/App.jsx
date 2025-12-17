@@ -62,6 +62,7 @@ const Badge = ({ children, color = "blue" }) => {
     green: "bg-emerald-100 text-emerald-700",
     orange: "bg-orange-100 text-orange-700",
     rose: "bg-rose-100 text-rose-700",
+    red: "bg-red-100 text-red-700",
     slate: "bg-slate-100 text-slate-600"
   };
   return (
@@ -89,12 +90,51 @@ const DEFAULT_GAMES = [
 // --- Main Application ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('admin');
 
   // --- User Role State ---
   const [userRole, setUserRole] = useState(() => {
     const saved = localStorage.getItem('sports_user_role');
     return saved || 'admin'; // default to admin
+  });
+
+  // --- Admin Login State ---
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    const saved = localStorage.getItem('sports_admin_logged_in');
+    return saved === 'true';
+  });
+
+  const [adminLoginForm, setAdminLoginForm] = useState({
+    username: '',
+    password: ''
+  });
+
+  // --- Teacher Login State ---
+  const [isTeacherLoggedIn, setIsTeacherLoggedIn] = useState(() => {
+    const saved = localStorage.getItem('sports_teacher_logged_in');
+    return saved === 'true';
+  });
+
+  const [loggedInTeacherId, setLoggedInTeacherId] = useState(() => {
+    const saved = localStorage.getItem('sports_logged_in_teacher_id');
+    return saved || '';
+  });
+
+  const [teacherLoginForm, setTeacherLoginForm] = useState({
+    username: '',
+    password: ''
+  });
+
+  // --- Admin Active Section State ---
+  const [activeAdminSection, setActiveAdminSection] = useState('assign');
+  
+  // --- Selected Game for Assignment ---
+  const [selectedGameForAssign, setSelectedGameForAssign] = useState('');
+
+  // --- Teacher Identification State ---
+  const [currentTeacherId, setCurrentTeacherId] = useState(() => {
+    const saved = localStorage.getItem('sports_current_teacher_id');
+    return saved || '';
   });
 
   // --- State ---
@@ -117,6 +157,29 @@ export default function App() {
       'Carrom (2vs2)': 4
     };
   });
+
+  const [teachers, setTeachers] = useState(() => {
+    const saved = localStorage.getItem('sports_teachers');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Teacher credentials: stored in localStorage with format: { teacherId: { username, password } }
+  const [teacherCredentials, setTeacherCredentials] = useState(() => {
+    const saved = localStorage.getItem('sports_teacher_credentials');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [newTeacherName, setNewTeacherName] = useState('');
+  const [newTeacherUsername, setNewTeacherUsername] = useState('');
+  const [newTeacherPassword, setNewTeacherPassword] = useState('');
+
+  const [gameTeacherAssignments, setGameTeacherAssignments] = useState(() => {
+    const saved = localStorage.getItem('sports_game_teachers');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [openTeacherDropdown, setOpenTeacherDropdown] = useState(false);
+  const [selectedTeachersForGame, setSelectedTeachersForGame] = useState([]);
 
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('sports_students');
@@ -149,6 +212,7 @@ export default function App() {
 
   // Camera State
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState('user'); // 'user' for front, 'environment' for rear
   const videoRef = useRef(null);
   const streamRef = useRef(null);
 
@@ -178,7 +242,54 @@ export default function App() {
     localStorage.setItem('sports_students', JSON.stringify(students));
     localStorage.setItem('sports_matches', JSON.stringify(matches));
     localStorage.setItem('sports_user_role', userRole);
-  }, [games, gameConfigs, students, matches, userRole]);
+    localStorage.setItem('sports_teachers', JSON.stringify(teachers));
+    localStorage.setItem('sports_game_teachers', JSON.stringify(gameTeacherAssignments));
+    localStorage.setItem('sports_admin_logged_in', isAdminLoggedIn ? 'true' : 'false');
+    localStorage.setItem('sports_current_teacher_id', currentTeacherId);
+    localStorage.setItem('sports_teacher_logged_in', isTeacherLoggedIn ? 'true' : 'false');
+    localStorage.setItem('sports_logged_in_teacher_id', loggedInTeacherId);
+    localStorage.setItem('sports_teacher_credentials', JSON.stringify(teacherCredentials));
+  }, [games, gameConfigs, students, matches, userRole, teachers, gameTeacherAssignments, isAdminLoggedIn, currentTeacherId, isTeacherLoggedIn, loggedInTeacherId, teacherCredentials]);
+
+  // --- Close Teacher Dropdown on Outside Click ---
+  // --- Close Teacher Dropdown on Outside Click ---
+  useEffect(() => {
+    if (!openTeacherDropdown) return;
+
+    const handleClickOutside = (e) => {
+      const dropdown = document.getElementById('teacherDropdownContainer');
+      if (dropdown && !dropdown.contains(e.target)) {
+        setOpenTeacherDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openTeacherDropdown]);
+  // --- Auto navigate based on role ---
+  useEffect(() => {
+    if (userRole === 'teacher') {
+      if (isTeacherLoggedIn) {
+        setActiveTab('dashboard');
+      } else {
+        setActiveTab('teacher-login');
+      }
+    } else if (userRole === 'admin') {
+      setActiveTab('admin');
+    }
+  }, [userRole, isTeacherLoggedIn]);
+
+  // --- Auto Logout When Role Changes ---
+  useEffect(() => {
+    if (userRole !== 'admin' && isAdminLoggedIn) {
+      handleAdminLogout();
+    }
+    
+    // Auto logout teacher when switching away from teacher role
+    if (userRole !== 'teacher' && isTeacherLoggedIn) {
+      handleTeacherLogout();
+    }
+  }, [userRole]);
 
   // --- Logic & Handlers ---
 
@@ -202,6 +313,159 @@ export default function App() {
     if (confirm('Reset to default games list?')) {
       setGames(DEFAULT_GAMES);
     }
+  };
+
+  const addTeacher = () => {
+    if (!newTeacherName.trim() || !newTeacherUsername.trim() || !newTeacherPassword.trim()) {
+      alert('Please fill in all teacher details (name, username, password)');
+      return;
+    }
+    
+    const newTeacher = {
+      id: Date.now().toString(),
+      name: newTeacherName.trim()
+    };
+    
+    // Add teacher credentials
+    setTeacherCredentials({
+      ...teacherCredentials,
+      [newTeacher.id]: {
+        username: newTeacherUsername.trim(),
+        password: newTeacherPassword.trim()
+      }
+    });
+    
+    setTeachers([...teachers, newTeacher]);
+    setNewTeacherName('');
+    setNewTeacherUsername('');
+    setNewTeacherPassword('');
+  };
+
+  const removeTeacher = (teacherId) => {
+    if (confirm('Remove this teacher?')) {
+      setTeachers(teachers.filter(t => t.id !== teacherId));
+      const newAssignments = { ...gameTeacherAssignments };
+      Object.keys(newAssignments).forEach(game => {
+        newAssignments[game] = newAssignments[game].filter(id => id !== teacherId);
+      });
+      setGameTeacherAssignments(newAssignments);
+      
+      // Remove teacher credentials
+      const newCredentials = { ...teacherCredentials };
+      delete newCredentials[teacherId];
+      setTeacherCredentials(newCredentials);
+    }
+  };
+
+  const getTeachersForGame = (gameName) => {
+    return (gameTeacherAssignments[gameName] || []).map(id => 
+      teachers.find(t => t.id === id)
+    ).filter(Boolean);
+  };
+
+  // --- Admin Login Handler ---
+  const handleAdminLogin = () => {
+    const { username, password } = adminLoginForm;
+    
+    // Simple validation - you can customize credentials here
+    if (username === 'admin' && password === 'admin123') {
+      setIsAdminLoggedIn(true);
+      setAdminLoginForm({ username: '', password: '' });
+    } else {
+      alert('Invalid username or password. Use admin / admin123');
+    }
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdminLoggedIn(false);
+    setAdminLoginForm({ username: '', password: '' });
+  };
+
+  const handleTeacherLogin = () => {
+    const { username, password } = teacherLoginForm;
+    
+    // Check credentials against teacher credentials
+    for (const [teacherId, creds] of Object.entries(teacherCredentials)) {
+      if (creds.username === username && creds.password === password) {
+        setIsTeacherLoggedIn(true);
+        setLoggedInTeacherId(teacherId);
+        setTeacherLoginForm({ username: '', password: '' });
+        return;
+      }
+    }
+    
+    alert('Invalid username or password. Please check your credentials.');
+  };
+
+  const handleTeacherLogout = () => {
+    setIsTeacherLoggedIn(false);
+    setLoggedInTeacherId('');
+    setTeacherLoginForm({ username: '', password: '' });
+  };
+  // --- Get Teacher's Assigned Game (uses logged in teacher for teacher role, currentTeacherId for admin) ---
+  const getTeacherAssignedGame = () => {
+    const teacherId = userRole === 'teacher' && isTeacherLoggedIn ? loggedInTeacherId : currentTeacherId;
+    if (!teacherId) return null;
+    
+    for (const [game, teacherIds] of Object.entries(gameTeacherAssignments)) {
+      if (teacherIds.includes(teacherId)) {
+        return game;
+      }
+    }
+    return null;
+  };
+
+  // --- Get Filtered Students for Teacher ---
+  const getTeacherStudents = () => {
+    const assignedGame = getTeacherAssignedGame();
+    if (!assignedGame) return students;
+    return students.filter(student => student.sports && student.sports.includes(assignedGame));
+  };
+
+  // --- Get Filtered Matches for Teacher ---
+  const getTeacherMatches = () => {
+    const assignedGame = getTeacherAssignedGame();
+    if (!assignedGame) return matches;
+    return matches.filter(match => match.sport === assignedGame);
+  };
+
+  // --- Get Filtered Games for Teacher ---
+  const getTeacherGames = () => {
+    if (userRole === 'teacher' && isTeacherLoggedIn) {
+      // Get games assigned to this teacher
+      const assignedGames = [];
+      for (const [game, teacherIds] of Object.entries(gameTeacherAssignments)) {
+        if (teacherIds.includes(loggedInTeacherId)) {
+          assignedGames.push(game);
+        }
+      }
+      return assignedGames;
+    }
+    return games;
+  };
+
+  // Get sport status for a student: 'not-played', 'playing', or 'played'
+  const getSportStatus = (studentId, sportName) => {
+    // Check if student has played (finished match)
+    const playedMatch = matches.find(m => 
+      m.sport === sportName && 
+      m.status === 'finished' && 
+      m.playerIds && 
+      m.playerIds.includes(studentId)
+    );
+    if (playedMatch) return 'played'; // Green
+
+    // Check if student is currently playing (scheduled match)
+    const playingMatch = matches.find(m => 
+      m.sport === sportName && 
+      m.status === 'scheduled' && 
+      m.playerIds && 
+      m.playerIds.includes(studentId)
+    );
+    if (playingMatch) return 'playing'; // Yellow
+
+    // Not played yet
+    return 'not-played'; // Red
   };
 
   const updateGamePlayerCount = (gameName, playerCount) => {
@@ -346,10 +610,11 @@ export default function App() {
 
   // --- Camera Logic ---
 
-  const startCamera = async () => {
+  const startCamera = async (facingMode = 'user') => {
     try {
       setIsCameraOpen(true);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setCameraFacingMode(facingMode);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -370,6 +635,12 @@ export default function App() {
       videoRef.current.srcObject = null;
     }
     setIsCameraOpen(false);
+    setCameraFacingMode('user');
+  };
+
+  const switchCamera = async () => {
+    const newFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+    await startCamera(newFacingMode);
   };
 
   const capturePhoto = () => {
@@ -404,7 +675,15 @@ export default function App() {
 
   // Filtering Logic for Filter Tab
   const filteredStudentsList = useMemo(() => {
-    return students.filter(student => {
+    let studentsList = students;
+    
+    // If teacher is viewing, filter by their assigned game
+    if (userRole === 'teacher' && currentTeacherId) {
+      const teacherStudents = getTeacherStudents();
+      studentsList = teacherStudents;
+    }
+    
+    return studentsList.filter(student => {
       const matchCategory = filters.category ? student.category === filters.category : true;
       const matchGender = filters.gender ? student.gender === filters.gender : true;
       const matchClass = filters.classVal ? student.classVal.toString() === filters.classVal : true;
@@ -420,7 +699,7 @@ export default function App() {
       
       return matchCategory && matchGender && matchClass && matchSport && matchSearch;
     });
-  }, [students, filters, searchTerm]);
+  }, [students, filters, searchTerm, userRole, currentTeacherId]);
 
   // Filtering Logic for Scheduler
   const eligiblePlayers = useMemo(() => {
@@ -541,101 +820,509 @@ export default function App() {
   const filteredPlayersForMatch = useMemo(() => {
     if (!scheduleForm.category) return [];
     const [catName, gender] = scheduleForm.category.split(' - ');
-    return eligiblePlayers.filter(s => s.category === catName && s.gender === gender);
-  }, [eligiblePlayers, scheduleForm.category]);
+    let players = eligiblePlayers.filter(s => s.category === catName && s.gender === gender);
+    
+    // If teacher is viewing, filter by their assigned game
+    if (userRole === 'teacher' && currentTeacherId) {
+      const teacherGame = getTeacherAssignedGame();
+      if (teacherGame) {
+        players = players.filter(s => s.sports.includes(teacherGame));
+      }
+    }
+    
+    return players;
+  }, [eligiblePlayers, scheduleForm.category, userRole, currentTeacherId]);
 
 
   // --- Render Views ---
 
-  const renderAdmin = () => (
+  const renderAdmin = () => {
+    // Show login page if not logged in
+    if (!isAdminLoggedIn) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">
+          <Card className="w-full max-w-md p-8 border-indigo-200 shadow-2xl">
+            <div className="text-center mb-8">
+              <Settings size={48} className="mx-auto text-indigo-600 mb-4" />
+              <h1 className="text-3xl font-bold text-slate-800">Admin Login</h1>
+              <p className="text-slate-500 mt-2">Access admin control panel</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Username</label>
+                <Input
+                  type="text"
+                  value={adminLoginForm.username}
+                  onChange={(e) => setAdminLoginForm({ ...adminLoginForm, username: e.target.value })}
+                  placeholder="Enter username"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdminLogin()}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Password</label>
+                <Input
+                  type="password"
+                  value={adminLoginForm.password}
+                  onChange={(e) => setAdminLoginForm({ ...adminLoginForm, password: e.target.value })}
+                  placeholder="Enter password"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdminLogin()}
+                />
+              </div>
+
+              <Button onClick={handleAdminLogin} className="w-full mt-6">
+                <Pencil size={16} /> Login
+              </Button>
+
+              <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-xs text-amber-800 font-semibold">Demo Credentials:</p>
+                <p className="text-xs text-amber-700 mt-1">Username: <span className="font-mono font-bold">admin</span></p>
+                <p className="text-xs text-amber-700">Password: <span className="font-mono font-bold">admin123</span></p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // Show admin panel if logged in
+    return (
     <div className="animate-in fade-in duration-500 space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold text-slate-800">Manage Games</h2>
-        <Button onClick={resetGames} variant="secondary" className="text-xs">
-          <RotateCcw size={14} /> Reset to Default
+      {/* Logout Button */}
+      <div className="flex justify-end">
+        <Button onClick={handleAdminLogout} variant="danger">
+          <X size={16} /> Logout
         </Button>
       </div>
 
-      <Card className="p-6 border-indigo-100 shadow-sm">
-        <h3 className="font-semibold text-slate-800 mb-4">Add New Game</h3>
-        <div className="flex gap-2">
-          <Input
-            value={newGameName}
-            onChange={e => setNewGameName(e.target.value)}
-            placeholder="e.g., Relay Race, Tug of War, etc."
-            onKeyPress={(e) => e.key === 'Enter' && addGame()}
-          />
-          <Button onClick={addGame} className="px-6">
-            <Plus size={16} /> Add
-          </Button>
-        </div>
-      </Card>
+      {/* Admin Navigation Buttons */}
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={() => setActiveAdminSection('assign')}
+          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+            activeAdminSection === 'assign'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          Assign Game
+        </button>
+        <button
+          onClick={() => setActiveAdminSection('manageGames')}
+          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+            activeAdminSection === 'manageGames'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          Manage Games
+        </button>
+        <button
+          onClick={() => setActiveAdminSection('manageTeachers')}
+          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+            activeAdminSection === 'manageTeachers'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          Manage Teachers
+        </button>
+      </div>
 
-      <Card className="overflow-hidden">
-        <div className="bg-slate-50 border-b border-slate-100 p-4">
-          <h3 className="font-semibold text-slate-800">Current Games List</h3>
-          <p className="text-xs text-slate-500 mt-1">
-            {games.length} game{games.length !== 1 ? 's' : ''} available for registration
-          </p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
-          {games.length === 0 ? (
-            <div className="col-span-full text-center py-8 text-slate-400">
-              <AlertCircle className="mx-auto mb-2" size={40} />
-              <p>No games added yet. Start by adding your first game!</p>
+      {/* Assign by Game Section */}
+      {activeAdminSection === 'assign' && teachers.length > 0 && games.length > 0 && (
+        <Card className="p-6 border-indigo-100 shadow-sm overflow-visible">
+          <h3 className="font-semibold text-slate-800 mb-4">Assign Teachers to Game</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-visible">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">Select Game</label>
+              <select
+                id="quickAssignGame"
+                value={selectedGameForAssign}
+                onChange={(e) => {
+                  setSelectedGameForAssign(e.target.value);
+                  setSelectedTeachersForGame([]);
+                }}
+                className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
+              >
+                <option value="">Choose a game...</option>
+                {games.map(game => (
+                  <option key={game} value={game}>
+                    {game}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">Select Teachers</label>
+              <div className="relative" id="teacherDropdownContainer">
+                <button
+                  onClick={() => setOpenTeacherDropdown(!openTeacherDropdown)}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white text-left text-slate-700 font-medium flex justify-between items-center"
+                >
+                  <span>{selectedTeachersForGame.length > 0 ? `${selectedTeachersForGame.length} teacher(s) selected` : 'Select teachers...'}</span>
+                  <span className="text-slate-400">▼</span>
+                </button>
+                
+                {openTeacherDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto">
+                    {(() => {
+                      // Find all teachers assigned to any game
+                      const allAssignedTeacherIds = new Set();
+                      Object.values(gameTeacherAssignments).forEach(teacherIds => {
+                        teacherIds.forEach(id => allAssignedTeacherIds.add(id));
+                      });
+                      
+                      // Filter to show only teachers NOT assigned to any game
+                      const availableTeachers = teachers.filter(teacher => !allAssignedTeacherIds.has(teacher.id));
+                      
+                      if (availableTeachers.length === 0) {
+                        return (
+                          <div className="px-4 py-3 text-sm text-slate-500 text-center">
+                            All teachers are already assigned to games
+                          </div>
+                        );
+                      }
+                      
+                      return availableTeachers.map(teacher => (
+                        <label key={teacher.id} className="flex items-center px-4 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0">
+                          <input
+                            type="checkbox"
+                            checked={selectedTeachersForGame.includes(teacher.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTeachersForGame([...selectedTeachersForGame, teacher.id]);
+                              } else {
+                                setSelectedTeachersForGame(selectedTeachersForGame.filter(id => id !== teacher.id));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 cursor-pointer"
+                          />
+                          <span className="ml-3 text-sm text-slate-700">{teacher.name}</span>
+                        </label>
+                      ));
+                    })()}
+                  </div>
+                )}
+                
+                {selectedTeachersForGame.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {selectedTeachersForGame.map(teacherId => {
+                      const teacher = teachers.find(t => t.id === teacherId);
+                      return (
+                        <span key={teacherId} className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-medium rounded-full">
+                          {teacher?.name}
+                          <button
+                            onClick={() => setSelectedTeachersForGame(selectedTeachersForGame.filter(id => id !== teacherId))}
+                            className="hover:text-indigo-900 font-bold"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <Button
+            onClick={() => {
+              const selectedGame = selectedGameForAssign;
+              const selectedTeachers = selectedTeachersForGame;
+              
+              if (!selectedGame) {
+                alert('Please select a game');
+                return;
+              }
+              
+              if (selectedTeachers.length === 0) {
+                alert('Please select a teacher');
+                return;
+              }
+              
+              setGameTeacherAssignments({
+                ...gameTeacherAssignments,
+                [selectedGame]: selectedTeachers
+              });
+              
+              setSelectedGameForAssign('');
+              setSelectedTeachersForGame([]);
+              setOpenTeacherDropdown(false);
+              alert(`${selectedTeachers.length} teacher(s) assigned to ${selectedGame}`);
+            }}
+            className="mt-4 w-full"
+          >
+            <Save size={16} /> Assign Teachers to Game
+          </Button>
+
+          {/* Game Assignments List */}
+          <div className="mt-6 pt-6 border-t border-slate-200">
+            <h4 className="font-semibold text-slate-800 mb-4">Games with Assigned Teachers</h4>
+            {Object.keys(gameTeacherAssignments).length === 0 ? (
+              <div className="text-center py-4 text-slate-400 text-sm">
+                <p>No teachers assigned to any game yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {games.map(game => {
+                  const assignedTeachers = gameTeacherAssignments[game] || [];
+                  if (assignedTeachers.length === 0) return null;
+                  
+                  const teacherNames = assignedTeachers
+                    .map(id => teachers.find(t => t.id === id)?.name)
+                    .filter(Boolean);
+                  
+                  return (
+                    <div key={game} className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                      <div className="font-medium text-emerald-900 mb-2">{game}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {teacherNames.map((name, idx) => (
+                          <span key={idx} className="inline-flex items-center px-2 py-1 bg-emerald-200 text-emerald-800 text-xs font-semibold rounded">
+                            ✓ {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {activeAdminSection === 'assign' && (teachers.length === 0 || games.length === 0) && (
+        <Card className="p-6 bg-amber-50 border-amber-200">
+          <div className="flex gap-3">
+            <AlertCircle className="text-amber-600 flex-shrink-0" size={20} />
+            <div className="text-sm text-amber-800">
+              <p className="font-semibold">Add Games and Teachers First</p>
+              <p className="text-amber-700 mt-1">You need to add at least one game and one teacher before you can assign them.</p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Manage Games Section */}
+      {activeAdminSection === 'manageGames' && (
+        <>
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-slate-800">Manage Games</h2>
+            <Button onClick={resetGames} variant="secondary" className="text-xs">
+              <RotateCcw size={14} /> Reset to Default
+            </Button>
+          </div>
+
+          <Card className="p-6 border-indigo-100 shadow-sm">
+            <h3 className="font-semibold text-slate-800 mb-4">Add New Game</h3>
+            <div className="flex gap-2">
+              <Input
+                value={newGameName}
+                onChange={e => setNewGameName(e.target.value)}
+                placeholder="e.g., Relay Race, Tug of War, etc."
+                onKeyPress={(e) => e.key === 'Enter' && addGame()}
+              />
+              <Button onClick={addGame} className="px-6">
+                <Plus size={16} /> Add
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <div className="bg-slate-50 border-b border-slate-100 p-4">
+              <h3 className="font-semibold text-slate-800">Current Games List</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {games.length} game{games.length !== 1 ? 's' : ''} available for registration
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+              {games.length === 0 ? (
+                <div className="col-span-full text-center py-8 text-slate-400">
+                  <AlertCircle className="mx-auto mb-2" size={40} />
+                  <p>No games added yet. Start by adding your first game!</p>
+                </div>
+              ) : (
+                games.map(game => (
+                  <div key={game} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors">
+                    <div className="flex-1">
+                      <span className="font-medium text-slate-800">{game}</span>
+                      <div className="text-xs text-slate-500 mt-1">Players per match: <span className="font-bold text-indigo-600">{getGamePlayerCount(game)}</span></div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => updateGamePlayerCount(game, Math.max(2, getGamePlayerCount(game) - 1))}
+                          className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
+                          title="Decrease players"
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          min="2"
+                          max="20"
+                          value={getGamePlayerCount(game)}
+                          onChange={(e) => updateGamePlayerCount(game, Math.max(2, parseInt(e.target.value) || 2))}
+                          className="w-12 px-2 py-1 text-xs text-center border border-slate-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200"
+                        />
+                        <button
+                          onClick={() => updateGamePlayerCount(game, Math.min(20, getGamePlayerCount(game) + 1))}
+                          className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
+                          title="Increase players"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => removeGame(game)}
+                        className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
+                        title="Remove Game"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Manage Teachers Section */}
+      {activeAdminSection === 'manageTeachers' && (
+        <Card className="p-6 border-indigo-100 shadow-sm">
+          <h3 className="font-semibold text-slate-800 mb-4">Manage Teachers & Credentials</h3>
+          
+          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-indigo-800 font-semibold mb-2">Add New Teacher</p>
+            <p className="text-xs text-indigo-700 mb-4">Create login credentials for each teacher. Teachers will use these to access their assigned games.</p>
+            
+            <div className="space-y-3">
+              <Input
+                value={newTeacherName}
+                onChange={e => setNewTeacherName(e.target.value)}
+                placeholder="Teacher Name (e.g., Mr. Sharma, Mrs. Patel)"
+              />
+              <Input
+                value={newTeacherUsername}
+                onChange={e => setNewTeacherUsername(e.target.value)}
+                placeholder="Username for login (e.g., sharma_mr)"
+              />
+              <Input
+                type="password"
+                value={newTeacherPassword}
+                onChange={e => setNewTeacherPassword(e.target.value)}
+                placeholder="Password for login"
+                onKeyPress={(e) => e.key === 'Enter' && addTeacher()}
+              />
+              <Button onClick={addTeacher} className="w-full">
+                <Plus size={16} /> Add Teacher with Credentials
+              </Button>
+            </div>
+          </div>
+          
+          {teachers.length === 0 ? (
+            <div className="text-center py-6 text-slate-400 text-sm">
+              <AlertCircle className="mx-auto mb-2" size={32} />
+              <p>No teachers added yet. Add your first teacher to assign them to games.</p>
             </div>
           ) : (
-            games.map(game => (
-              <div key={game} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors">
-                <div className="flex-1">
-                  <span className="font-medium text-slate-800">{game}</span>
-                  <div className="text-xs text-slate-500 mt-1">Players per match: <span className="font-bold text-indigo-600">{getGamePlayerCount(game)}</span></div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => updateGamePlayerCount(game, Math.max(2, getGamePlayerCount(game) - 1))}
-                      className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
-                      title="Decrease players"
-                    >
-                      −
-                    </button>
-                    <input
-                      type="number"
-                      min="2"
-                      max="20"
-                      value={getGamePlayerCount(game)}
-                      onChange={(e) => updateGamePlayerCount(game, Math.max(2, parseInt(e.target.value) || 2))}
-                      className="w-12 px-2 py-1 text-xs text-center border border-slate-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200"
-                    />
-                    <button
-                      onClick={() => updateGamePlayerCount(game, Math.min(20, getGamePlayerCount(game) + 1))}
-                      className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
-                      title="Increase players"
-                    >
-                      +
-                    </button>
+            <div className="grid grid-cols-1 gap-3">
+              {teachers.map(teacher => {
+                const creds = teacherCredentials[teacher.id];
+                const assignedGame = Object.entries(gameTeacherAssignments).find(([_, teacherIds]) => 
+                  teacherIds.includes(teacher.id)
+                )?.[0];
+                
+                return (
+                  <div key={teacher.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="font-bold text-slate-800">{teacher.name}</div>
+                        {creds && (
+                          <div className="text-xs text-slate-600 mt-1 space-y-0.5">
+                            <div><span className="font-semibold">Username:</span> {creds.username}</div>
+                            <div><span className="font-semibold">Password:</span> {creds.password}</div>
+                          </div>
+                        )}
+                        {assignedGame && (
+                          <div className="text-xs text-indigo-600 font-semibold mt-1">Assigned to: {assignedGame}</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => removeTeacher(teacher.id)}
+                        className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
+                        title="Remove Teacher"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => removeGame(game)}
-                    className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
-                    title="Remove Game"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            ))
+                );
+              })}
+            </div>
           )}
-        </div>
-      </Card>
+        </Card>
+      )}
 
-      <Card className="p-4 bg-blue-50 border-blue-100 border">
-        <div className="flex gap-3">
-          <CheckCircle2 size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-blue-800">
-            <p className="font-semibold mb-1">Games will appear in Registration Form</p>
-            <p className="text-blue-700">Any game you add or remove here will automatically be updated in the student registration form and match scheduling options.</p>
+      {/* Info Box */}
+      {activeAdminSection === 'manageGames' && (
+        <Card className="p-4 bg-blue-50 border-blue-100 border">
+          <div className="flex gap-3">
+            <CheckCircle2 size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-800">
+              <p className="font-semibold mb-1">Games will appear in Registration Form</p>
+              <p className="text-blue-700">Any game you add or remove here will automatically be updated in the student registration form and match scheduling options.</p>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+    );
+  };
+
+  const renderTeacherLogin = () => (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">
+      <Card className="w-full max-w-md p-8 border-indigo-200 shadow-2xl">
+        <div className="text-center mb-8">
+          <Activity size={48} className="mx-auto text-indigo-600 mb-4" />
+          <h1 className="text-3xl font-bold text-slate-800">Teacher Login</h1>
+          <p className="text-slate-500 mt-2">Access your sports management portal</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Username</label>
+            <Input
+              type="text"
+              value={teacherLoginForm.username}
+              onChange={(e) => setTeacherLoginForm({ ...teacherLoginForm, username: e.target.value })}
+              placeholder="Enter your username"
+              onKeyPress={(e) => e.key === 'Enter' && handleTeacherLogin()}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Password</label>
+            <Input
+              type="password"
+              value={teacherLoginForm.password}
+              onChange={(e) => setTeacherLoginForm({ ...teacherLoginForm, password: e.target.value })}
+              placeholder="Enter your password"
+              onKeyPress={(e) => e.key === 'Enter' && handleTeacherLogin()}
+            />
+          </div>
+
+          <Button onClick={handleTeacherLogin} className="w-full mt-6">
+            <Activity size={16} /> Login as Teacher
+          </Button>
+
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-800 font-semibold">Credentials provided by your admin</p>
+            <p className="text-xs text-blue-700 mt-1">Contact your administrator if you don't have login credentials</p>
           </div>
         </div>
       </Card>
@@ -837,6 +1524,13 @@ export default function App() {
                     title="Capture"
                   >
                     <div className="w-8 h-8 rounded-full border-2 border-slate-300 bg-red-500"></div>
+                  </button>
+                  <button
+                    onClick={switchCamera}
+                    className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-indigo-700 transition-colors"
+                    title="Switch Camera"
+                  >
+                    <RotateCcw size={16} />
                   </button>
                   <button
                     onClick={stopCamera}
@@ -1050,13 +1744,13 @@ export default function App() {
               <th className="p-4 font-semibold">Gender</th>
               <th className="p-4 font-semibold">Sports</th>
               <th className="p-4 font-semibold">Father's Name</th>
-              <th className="p-4 font-semibold text-right">Actions</th>
+              {userRole === 'admin' && <th className="p-4 font-semibold text-right">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredStudentsList.length === 0 ? (
               <tr>
-                <td colSpan="9" className="p-8 text-center text-slate-400">
+                <td colSpan={userRole === 'admin' ? '9' : '8'} className="p-8 text-center text-slate-400">
                   No participants match your filters.
                 </td>
               </tr>
@@ -1095,32 +1789,44 @@ export default function App() {
                   <td className="p-4 text-slate-600">{student.gender}</td>
                   <td className="p-4">
                     <div className="flex flex-wrap gap-1">
-                      {student.sports.map(s => (
-                        <span key={s} className={`px-1.5 py-0.5 rounded text-xs border ${filters.sport === s ? 'bg-indigo-100 text-indigo-700 border-indigo-200 font-bold' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                          {s}
-                        </span>
-                      ))}
+                      {student.sports.map(s => {
+                        const status = getSportStatus(student.id, s);
+                        let statusColor = 'bg-red-100 text-red-700 border-red-200'; // not-played
+                        if (status === 'playing') {
+                          statusColor = 'bg-yellow-100 text-yellow-700 border-yellow-200'; // playing
+                        } else if (status === 'played') {
+                          statusColor = 'bg-green-100 text-green-700 border-green-200'; // played
+                        }
+                        
+                        return (
+                          <span key={s} className={`px-1.5 py-0.5 rounded text-xs border font-medium ${statusColor}`}>
+                            {s}
+                          </span>
+                        );
+                      })}
                     </div>
                   </td>
                   <td className="p-4 text-slate-600 text-xs">{student.fatherName}</td>
-                  <td className="p-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => startEdit(student)}
-                        className="p-2 text-slate-400 hover:bg-amber-50 hover:text-amber-500 rounded-lg transition-colors"
-                        title="Edit"
-                      >
-                        <Pencil size={18} />
-                      </button>
-                      <button
-                        onClick={() => deleteStudent(student.id)}
-                        className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
+                  {userRole === 'admin' && (
+                    <td className="p-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => startEdit(student)}
+                          className="p-2 text-slate-400 hover:bg-amber-50 hover:text-amber-500 rounded-lg transition-colors"
+                          title="Edit"
+                        >
+                          <Pencil size={18} />
+                        </button>
+                        <button
+                          onClick={() => deleteStudent(student.id)}
+                          className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
@@ -1203,9 +1909,19 @@ export default function App() {
                     <div>
                       <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Registered Sports</label>
                       <div className="flex flex-wrap gap-2">
-                        {student.sports.map(s => (
-                          <Badge key={s} color="indigo">{s}</Badge>
-                        ))}
+                        {student.sports.map(s => {
+                          const status = getSportStatus(student.id, s);
+                          let statusColor = 'rose'; // not-played (red)
+                          if (status === 'playing') {
+                            statusColor = 'orange'; // playing (yellow)
+                          } else if (status === 'played') {
+                            statusColor = 'green'; // played
+                          }
+                          
+                          return (
+                            <Badge key={s} color={statusColor}>{s}</Badge>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -1366,8 +2082,22 @@ export default function App() {
     </div>
   );
 
-  const renderScheduler = () => (
+  const renderScheduler = () => {
+    const displayMatches = userRole === 'teacher' && currentTeacherId 
+      ? getTeacherMatches() 
+      : matches;
+    
+    const teacherAssignedGame = userRole === 'teacher' && currentTeacherId ? getTeacherAssignedGame() : null;
+
+    return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Teacher's Assigned Game Info */}
+      {userRole === 'teacher' && teacherAssignedGame && (
+        <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <div className="text-sm"><span className="font-semibold text-slate-700">Assigned Game:</span> <span className="text-indigo-700 font-bold">{teacherAssignedGame}</span></div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* Scheduler Controls */}
@@ -1504,19 +2234,19 @@ export default function App() {
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-slate-700">Scheduled Matches</h3>
             <span className="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">
-              {matches.filter(m => m.status === 'scheduled').length} Pending
+              {displayMatches.filter(m => m.status === 'scheduled').length} Pending
             </span>
           </div>
 
           <div className="space-y-3">
-            {matches.filter(m => m.status === 'scheduled').length === 0 && (
+            {displayMatches.filter(m => m.status === 'scheduled').length === 0 && (
               <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
                 <Calendar className="mx-auto text-slate-300 mb-2" size={48} />
                 <p className="text-slate-500">No active matches. Schedule one!</p>
               </div>
             )}
 
-            {matches.filter(m => m.status === 'scheduled').map(match => {
+            {displayMatches.filter(m => m.status === 'scheduled').map(match => {
               const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
               if (matchPlayers.length === 0) return null;
 
@@ -1585,11 +2315,11 @@ export default function App() {
           </div>
 
           {/* Finished Matches Section */}
-          {matches.some(m => m.status === 'finished') && (
+          {displayMatches.some(m => m.status === 'finished') && (
             <div className="mt-8 pt-6 border-t border-slate-200">
               <h3 className="font-bold text-slate-700 mb-4">Completed Matches</h3>
               <div className="grid gap-3 opacity-75">
-                {matches.filter(m => m.status === 'finished').reverse().map(match => {
+                {displayMatches.filter(m => m.status === 'finished').reverse().map(match => {
                   const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
                   let winnerDisplay = '';
                   let winnerBadge = '';
@@ -1636,27 +2366,40 @@ export default function App() {
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   const renderResults = () => {
     // Group winners by sport and category
-    const winners = matches.filter(m => m.status === 'finished');
+    let winnersMatches = matches.filter(m => m.status === 'finished');
+    
+    // If teacher is viewing, filter by their assigned game
+    if (userRole === 'teacher' && currentTeacherId) {
+      winnersMatches = getTeacherMatches().filter(m => m.status === 'finished');
+    }
 
     return (
       <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl mx-auto">
+        {/* Teacher's Assigned Game Info */}
+        {userRole === 'teacher' && currentTeacherId && (
+          <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <div className="text-sm"><span className="font-semibold text-slate-700">Assigned Game:</span> <span className="text-indigo-700 font-bold">{getTeacherAssignedGame()}</span></div>
+          </div>
+        )}
+
         <div className="text-center mb-8">
           <h2 className="text-2xl font-bold text-slate-800">Tournament Results</h2>
           <p className="text-slate-500">Hall of Fame</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {winners.length === 0 ? (
+          {winnersMatches.length === 0 ? (
             <div className="col-span-full text-center py-12">
               <Trophy className="mx-auto text-slate-200 mb-4" size={64} />
               <p className="text-slate-500">No results to display yet.</p>
             </div>
           ) : (
-            winners.map(match => {
+            winnersMatches.map(match => {
               const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
               let winnerDisplay = '';
               let competedWith = '';
@@ -1816,20 +2559,39 @@ export default function App() {
       { id: 'results', label: 'Results', icon: Medal },
     ];
 
-    // Admin gets all tabs
+    // Admin gets all tabs, but only if logged in
     if (userRole === 'admin') {
-      return [
-        { id: 'admin', label: 'Admin', icon: Settings },
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'participants', label: 'Participants', icon: Table2 },
-        { id: 'register', label: 'Registration', icon: UserPlus },
-        { id: 'dummy', label: 'Dummy Data', icon: Zap },
-        { id: 'scheduler', label: 'Competition', icon: Calendar },
-        { id: 'results', label: 'Results', icon: Medal },
-      ];
+      if (isAdminLoggedIn) {
+        return [
+          { id: 'admin', label: 'Admin', icon: Settings },
+          { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+          { id: 'participants', label: 'Participants', icon: Table2 },
+          { id: 'register', label: 'Registration', icon: UserPlus },
+          { id: 'dummy', label: 'Dummy Data', icon: Zap },
+          { id: 'scheduler', label: 'Competition', icon: Calendar },
+          { id: 'results', label: 'Results', icon: Medal },
+        ];
+      } else {
+        // If admin is not logged in, only show admin tab
+        return [
+          { id: 'admin', label: 'Admin', icon: Settings },
+        ];
+      }
     }
 
-    // Teachers get dashboard, participants, competition, and results
+    // Teachers - check if logged in
+    if (userRole === 'teacher') {
+      if (isTeacherLoggedIn) {
+        return baseTabs;
+      } else {
+        // If teacher is not logged in, only show login tab
+        return [
+          { id: 'teacher-login', label: 'Teacher Login', icon: Activity },
+        ];
+      }
+    }
+
+    // Default fallback
     return baseTabs;
   };
 
@@ -1852,6 +2614,47 @@ export default function App() {
                 <option value="teacher">👨‍🏫 Teacher</option>
               </select>
             </div>
+
+            {/* Teacher Selector (shown only in admin when using teacher role for preview) */}
+            {userRole === 'teacher' && !isTeacherLoggedIn && teachers.length > 0 && (
+              <div className="ml-4 flex items-center gap-2">
+                <span className="text-xs font-semibold text-indigo-100">Teacher:</span>
+                <select
+                  value={currentTeacherId}
+                  onChange={e => setCurrentTeacherId(e.target.value)}
+                  className="px-2 py-1 rounded bg-indigo-500 text-white text-xs font-semibold hover:bg-indigo-400 transition-colors cursor-pointer"
+                >
+                  <option value="">Select teacher...</option>
+                  {teachers.map(teacher => {
+                    // Find which game this teacher is assigned to
+                    const assignedGame = Object.entries(gameTeacherAssignments).find(([_, teacherIds]) => 
+                      teacherIds.includes(teacher.id)
+                    )?.[0];
+                    
+                    return (
+                      <option key={teacher.id} value={teacher.id}>
+                        {teacher.name} {assignedGame ? `(${assignedGame})` : '(Not Assigned)'}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+
+            {/* Logout button for logged-in teachers */}
+            {userRole === 'teacher' && isTeacherLoggedIn && (
+              <div className="ml-4 flex items-center gap-2">
+                <span className="text-xs font-semibold text-indigo-100">
+                  👨‍🏫 {teachers.find(t => t.id === loggedInTeacherId)?.name || 'Teacher'}
+                </span>
+                <button
+                  onClick={handleTeacherLogout}
+                  className="px-2 py-1 rounded bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <X size={14} /> Logout
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1876,6 +2679,7 @@ export default function App() {
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
         {activeTab === 'admin' && renderAdmin()}
+        {activeTab === 'teacher-login' && renderTeacherLogin()}
         {activeTab === 'dashboard' && renderDashboard()}
         {activeTab === 'participants' && renderParticipants()}
         {activeTab === 'register' && renderRegistration()}
