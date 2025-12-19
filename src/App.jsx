@@ -83,7 +83,7 @@ const getCategory = (cls) => {
 };
 
 const DEFAULT_GAMES = [
-  'Badminton', 'Carrom (1vs1)', 'Carrom (2vs2)', 'Chess', 'Ludo', 'Slow Cycle Race', 
+  'Badminton', 'Carrom (1vs1)', 'Carrom (2vs2)', 'Chess', 'Ludo', 'Slow Cycle Race',
   'Race', 'Sack Race', 'Spoon Race', 'High Jump', 'Long Jump', 'Skipping', 'Musical Chair', 'Discus Throw'
 ];
 
@@ -127,7 +127,7 @@ export default function App() {
 
   // --- Admin Active Section State ---
   const [activeAdminSection, setActiveAdminSection] = useState('assign');
-  
+
   // --- Selected Game for Assignment ---
   const [selectedGameForAssign, setSelectedGameForAssign] = useState('');
 
@@ -172,6 +172,14 @@ export default function App() {
   const [newTeacherName, setNewTeacherName] = useState('');
   const [newTeacherUsername, setNewTeacherUsername] = useState('');
   const [newTeacherPassword, setNewTeacherPassword] = useState('');
+  const [newTeacherBranch, setNewTeacherBranch] = useState('');
+
+  // Edit Teacher State
+  const [editingTeacherId, setEditingTeacherId] = useState(null);
+  const [editTeacherName, setEditTeacherName] = useState('');
+  const [editTeacherUsername, setEditTeacherUsername] = useState('');
+  const [editTeacherPassword, setEditTeacherPassword] = useState('');
+  const [editTeacherBranch, setEditTeacherBranch] = useState('');
 
   const [gameTeacherAssignments, setGameTeacherAssignments] = useState(() => {
     const saved = localStorage.getItem('sports_game_teachers');
@@ -204,6 +212,9 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null);
 
+  // Edit Match Winner State
+  const [editingMatchId, setEditingMatchId] = useState(null);
+
   // Student Profile Detail View
   const [selectedStudentId, setSelectedStudentId] = useState(null);
 
@@ -227,6 +238,9 @@ export default function App() {
   // Search State
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Participants View Mode State (for teachers to toggle between My Game and All Games)
+  const [participantsViewMode, setParticipantsViewMode] = useState('all-games');
+
   // Match Schedule State
   const [scheduleForm, setScheduleForm] = useState({
     sport: '',
@@ -234,6 +248,44 @@ export default function App() {
     playerCount: 2, // Number of players to select
     playerIds: [] // Array of selected player IDs
   });
+
+  // Scheduler View Mode (initial, manual scheduling vs auto bracket)
+  const [schedulerViewMode, setSchedulerViewMode] = useState('initial'); // 'initial', 'manual' or 'bracket'
+
+  // Match Filter State (for competition tab)
+  const [matchFilters, setMatchFilters] = useState({
+    category: '',
+    gender: '',
+    classVal: '',
+    sport: ''
+  });
+
+  // Match Search State (for competition tab)
+  const [matchSearchTerm, setMatchSearchTerm] = useState('');
+
+  // Results Sport Filter State
+  const [resultsSportFilter, setResultsSportFilter] = useState('');
+
+  // Tournament Brackets State
+  const [tournaments, setTournaments] = useState(() => {
+    const saved = localStorage.getItem('sports_tournaments');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // Auto-select teacher's assigned sport in scheduler
+  useEffect(() => {
+    if (userRole === 'teacher' && isTeacherLoggedIn) {
+      const assignedSport = getTeacherAssignedGame();
+      if (assignedSport && scheduleForm.sport !== assignedSport) {
+        setScheduleForm({
+          sport: assignedSport,
+          category: '',
+          playerCount: getGamePlayerCount(assignedSport),
+          playerIds: []
+        });
+      }
+    }
+  }, [userRole, isTeacherLoggedIn]);
 
   // --- Persistence ---
   useEffect(() => {
@@ -249,7 +301,8 @@ export default function App() {
     localStorage.setItem('sports_teacher_logged_in', isTeacherLoggedIn ? 'true' : 'false');
     localStorage.setItem('sports_logged_in_teacher_id', loggedInTeacherId);
     localStorage.setItem('sports_teacher_credentials', JSON.stringify(teacherCredentials));
-  }, [games, gameConfigs, students, matches, userRole, teachers, gameTeacherAssignments, isAdminLoggedIn, currentTeacherId, isTeacherLoggedIn, loggedInTeacherId, teacherCredentials]);
+    localStorage.setItem('sports_tournaments', JSON.stringify(tournaments));
+  }, [games, gameConfigs, students, matches, userRole, teachers, gameTeacherAssignments, isAdminLoggedIn, currentTeacherId, isTeacherLoggedIn, loggedInTeacherId, teacherCredentials, tournaments]);
 
   // --- Close Teacher Dropdown on Outside Click ---
   // --- Close Teacher Dropdown on Outside Click ---
@@ -284,7 +337,7 @@ export default function App() {
     if (userRole !== 'admin' && isAdminLoggedIn) {
       handleAdminLogout();
     }
-    
+
     // Auto logout teacher when switching away from teacher role
     if (userRole !== 'teacher' && isTeacherLoggedIn) {
       handleTeacherLogout();
@@ -316,16 +369,17 @@ export default function App() {
   };
 
   const addTeacher = () => {
-    if (!newTeacherName.trim() || !newTeacherUsername.trim() || !newTeacherPassword.trim()) {
-      alert('Please fill in all teacher details (name, username, password)');
+    if (!newTeacherName.trim() || !newTeacherUsername.trim() || !newTeacherPassword.trim() || !newTeacherBranch.trim()) {
+      alert('Please fill in all teacher details (name, username, password, branch)');
       return;
     }
-    
+
     const newTeacher = {
       id: Date.now().toString(),
-      name: newTeacherName.trim()
+      name: newTeacherName.trim(),
+      branch: newTeacherBranch.trim()
     };
-    
+
     // Add teacher credentials
     setTeacherCredentials({
       ...teacherCredentials,
@@ -334,11 +388,12 @@ export default function App() {
         password: newTeacherPassword.trim()
       }
     });
-    
+
     setTeachers([...teachers, newTeacher]);
     setNewTeacherName('');
     setNewTeacherUsername('');
     setNewTeacherPassword('');
+    setNewTeacherBranch('');
   };
 
   const removeTeacher = (teacherId) => {
@@ -349,7 +404,7 @@ export default function App() {
         newAssignments[game] = newAssignments[game].filter(id => id !== teacherId);
       });
       setGameTeacherAssignments(newAssignments);
-      
+
       // Remove teacher credentials
       const newCredentials = { ...teacherCredentials };
       delete newCredentials[teacherId];
@@ -357,8 +412,58 @@ export default function App() {
     }
   };
 
+  const startEditTeacher = (teacherId) => {
+    const teacher = teachers.find(t => t.id === teacherId);
+    const creds = teacherCredentials[teacherId];
+    if (teacher && creds) {
+      setEditingTeacherId(teacherId);
+      setEditTeacherName(teacher.name);
+      setEditTeacherUsername(creds.username);
+      setEditTeacherPassword(creds.password);
+      setEditTeacherBranch(teacher.branch || '');
+    }
+  };
+
+  const saveTeacher = () => {
+    if (!editTeacherName.trim() || !editTeacherUsername.trim() || !editTeacherPassword.trim() || !editTeacherBranch.trim()) {
+      alert('Please fill in all teacher details (name, username, password, branch)');
+      return;
+    }
+
+    // Update teacher name and branch
+    setTeachers(teachers.map(t =>
+      t.id === editingTeacherId
+        ? { ...t, name: editTeacherName.trim(), branch: editTeacherBranch.trim() }
+        : t
+    ));
+
+    // Update teacher credentials
+    setTeacherCredentials({
+      ...teacherCredentials,
+      [editingTeacherId]: {
+        username: editTeacherUsername.trim(),
+        password: editTeacherPassword.trim()
+      }
+    });
+
+    // Clear edit state
+    setEditingTeacherId(null);
+    setEditTeacherName('');
+    setEditTeacherUsername('');
+    setEditTeacherPassword('');
+    setEditTeacherBranch('');
+  };
+
+  const cancelEditTeacher = () => {
+    setEditingTeacherId(null);
+    setEditTeacherName('');
+    setEditTeacherUsername('');
+    setEditTeacherPassword('');
+    setEditTeacherBranch('');
+  };
+
   const getTeachersForGame = (gameName) => {
-    return (gameTeacherAssignments[gameName] || []).map(id => 
+    return (gameTeacherAssignments[gameName] || []).map(id =>
       teachers.find(t => t.id === id)
     ).filter(Boolean);
   };
@@ -366,7 +471,7 @@ export default function App() {
   // --- Admin Login Handler ---
   const handleAdminLogin = () => {
     const { username, password } = adminLoginForm;
-    
+
     // Simple validation - you can customize credentials here
     if (username === 'admin' && password === 'admin123') {
       setIsAdminLoggedIn(true);
@@ -383,7 +488,7 @@ export default function App() {
 
   const handleTeacherLogin = () => {
     const { username, password } = teacherLoginForm;
-    
+
     // Check credentials against teacher credentials
     for (const [teacherId, creds] of Object.entries(teacherCredentials)) {
       if (creds.username === username && creds.password === password) {
@@ -393,7 +498,7 @@ export default function App() {
         return;
       }
     }
-    
+
     alert('Invalid username or password. Please check your credentials.');
   };
 
@@ -406,7 +511,7 @@ export default function App() {
   const getTeacherAssignedGame = () => {
     const teacherId = userRole === 'teacher' && isTeacherLoggedIn ? loggedInTeacherId : currentTeacherId;
     if (!teacherId) return null;
-    
+
     for (const [game, teacherIds] of Object.entries(gameTeacherAssignments)) {
       if (teacherIds.includes(teacherId)) {
         return game;
@@ -447,19 +552,19 @@ export default function App() {
   // Get sport status for a student: 'not-played', 'playing', or 'played'
   const getSportStatus = (studentId, sportName) => {
     // Check if student has played (finished match)
-    const playedMatch = matches.find(m => 
-      m.sport === sportName && 
-      m.status === 'finished' && 
-      m.playerIds && 
+    const playedMatch = matches.find(m =>
+      m.sport === sportName &&
+      m.status === 'finished' &&
+      m.playerIds &&
       m.playerIds.includes(studentId)
     );
     if (playedMatch) return 'played'; // Green
 
     // Check if student is currently playing (scheduled match)
-    const playingMatch = matches.find(m => 
-      m.sport === sportName && 
-      m.status === 'scheduled' && 
-      m.playerIds && 
+    const playingMatch = matches.find(m =>
+      m.sport === sportName &&
+      m.status === 'scheduled' &&
+      m.playerIds &&
       m.playerIds.includes(studentId)
     );
     if (playingMatch) return 'playing'; // Yellow
@@ -567,7 +672,13 @@ export default function App() {
     };
 
     setMatches([...matches, newMatch]);
-    setScheduleForm({ sport: '', category: '', playerCount: 2, playerIds: [] });
+    // Keep sport selected but clear category and player selections
+    setScheduleForm({
+      sport: scheduleForm.sport,
+      category: '',
+      playerCount: scheduleForm.playerCount,
+      playerIds: []
+    });
   };
 
   const declareWinner = (matchId, winnerId) => {
@@ -579,7 +690,8 @@ export default function App() {
         return {
           ...m,
           winnerId: isTeamGame ? (Array.isArray(winnerId) ? winnerId : [winnerId]) : winnerId,
-          status: 'finished'
+          status: 'finished',
+          completedTimestamp: new Date().toISOString()
         };
       }
       return m;
@@ -658,48 +770,70 @@ export default function App() {
 
   // --- Derived Data for UI ---
 
-  // Dashboard Stats
+  // Dashboard Stats - Customized for teachers to show only their sport
   const stats = useMemo(() => {
+    // Get the right list based on user role
+    const displayStudents = (userRole === 'teacher' && isTeacherLoggedIn) ? getTeacherStudents() : students;
+    const displayMatches = (userRole === 'teacher' && isTeacherLoggedIn) ? getTeacherMatches() : matches;
+
     return {
-      totalStudents: students.length,
-      totalMatches: matches.length,
-      matchesPending: matches.filter(m => m.status === 'scheduled').length,
-      matchesFinished: matches.filter(m => m.status === 'finished').length,
+      totalStudents: displayStudents.length,
+      totalMatches: displayMatches.length,
+      matchesPending: displayMatches.filter(m => m.status === 'scheduled').length,
+      matchesFinished: displayMatches.filter(m => m.status === 'finished').length,
       byCategory: {
-        juniors: students.filter(s => s.category.includes('Junior')).length,
-        middle: students.filter(s => s.category.includes('Middle')).length,
-        seniors: students.filter(s => s.category.includes('Senior')).length,
+        juniors: displayStudents.filter(s => s.category.includes('Junior')).length,
+        middle: displayStudents.filter(s => s.category.includes('Middle')).length,
+        seniors: displayStudents.filter(s => s.category.includes('Senior')).length,
       }
     };
-  }, [students, matches]);
+  }, [students, matches, userRole, isTeacherLoggedIn, loggedInTeacherId]);
 
   // Filtering Logic for Filter Tab
+  // Helper function to sort students: junior to senior, then girls to boys
+  const sortStudents = (studentsList) => {
+    return [...studentsList].sort((a, b) => {
+      // First sort by class (junior to senior)
+      const classComparison = a.classVal - b.classVal;
+      if (classComparison !== 0) return classComparison;
+
+      // Then sort by gender (girls first, then boys)
+      const genderOrder = { 'Girls': 0, 'Boys': 1 };
+      const genderComparison = (genderOrder[a.gender] || 2) - (genderOrder[b.gender] || 2);
+      return genderComparison;
+    });
+  };
+
   const filteredStudentsList = useMemo(() => {
     let studentsList = students;
-    
-    // If teacher is viewing, filter by their assigned game
-    if (userRole === 'teacher' && currentTeacherId) {
+
+    // If teacher is viewing My Game mode, filter by their assigned game
+    // For All Games mode, show all students regardless of role
+    if (userRole === 'teacher' && isTeacherLoggedIn && participantsViewMode === 'my-game') {
       const teacherStudents = getTeacherStudents();
       studentsList = teacherStudents;
     }
-    
-    return studentsList.filter(student => {
+
+    const filtered = studentsList.filter(student => {
       const matchCategory = filters.category ? student.category === filters.category : true;
       const matchGender = filters.gender ? student.gender === filters.gender : true;
       const matchClass = filters.classVal ? student.classVal.toString() === filters.classVal : true;
       const matchSport = filters.sport ? student.sports.includes(filters.sport) : true;
-      
+
       // Search filter - search by name, roll number, or father's name
       const searchLower = searchTerm.toLowerCase();
-      const matchSearch = searchTerm ? 
+      const matchSearch = searchTerm ?
         student.name.toLowerCase().includes(searchLower) ||
         student.rollNumber.toLowerCase().includes(searchLower) ||
         student.fatherName.toLowerCase().includes(searchLower)
         : true;
-      
+
       return matchCategory && matchGender && matchClass && matchSport && matchSearch;
     });
-  }, [students, filters, searchTerm, userRole, currentTeacherId]);
+
+    // Sort students: junior to senior, then girls to boys
+    return sortStudents(filtered);
+  }, [students, filters, searchTerm, userRole, isTeacherLoggedIn, participantsViewMode]);
 
   // Filtering Logic for Scheduler
   const eligiblePlayers = useMemo(() => {
@@ -750,24 +884,24 @@ export default function App() {
     const newMatches = [];
     const selectedSport = scheduleForm.sport;
     const playerCount = getGamePlayerCount(selectedSport);
-    
+
     // Group eligible players by the selected sport and category
     const matchGroups = {};
-    
+
     eligiblePlayers.forEach(player => {
       const playerData = students.find(s => s.id === player.id);
       if (!playerData) return;
-      
+
       // Only include players who have registered for the selected sport
       if (!playerData.sports.includes(selectedSport)) return;
-      
+
       const category = `${player.category} - ${player.gender}`;
       const groupKey = `${selectedSport}|${category}`;
-      
+
       if (!matchGroups[groupKey]) {
         matchGroups[groupKey] = [];
       }
-      
+
       // Add player only once
       if (!matchGroups[groupKey].includes(player.id)) {
         matchGroups[groupKey].push(player.id);
@@ -777,25 +911,25 @@ export default function App() {
     // Create one round of matches for each category group
     Object.entries(matchGroups).forEach(([groupKey, playerIds]) => {
       if (playerIds.length < playerCount) return; // Need minimum players
-      
+
       const [sport, category] = groupKey.split('|');
-      
+
       // Shuffle players randomly
       const shuffled = [...playerIds].sort(() => Math.random() - 0.5);
-      
+
       // Create only ONE round of matches (first batch of shuffled players)
       // Each player appears in at most one match for this sport-category
       for (let i = 0; i + playerCount <= shuffled.length; i += playerCount) {
         const matchPlayerIds = shuffled.slice(i, i + playerCount);
-        
+
         // Check if match already exists
-        const matchExists = matches.some(m => 
-          m.sport === sport && 
+        const matchExists = matches.some(m =>
+          m.sport === sport &&
           m.category === category &&
           m.status === 'scheduled' &&
           JSON.stringify(m.playerIds.sort()) === JSON.stringify(matchPlayerIds.sort())
         );
-        
+
         if (!matchExists && matchPlayerIds.length === playerCount) {
           newMatches.push({
             id: Date.now().toString() + Math.random(),
@@ -821,7 +955,7 @@ export default function App() {
     if (!scheduleForm.category) return [];
     const [catName, gender] = scheduleForm.category.split(' - ');
     let players = eligiblePlayers.filter(s => s.category === catName && s.gender === gender);
-    
+
     // If teacher is viewing, filter by their assigned game
     if (userRole === 'teacher' && currentTeacherId) {
       const teacherGame = getTeacherAssignedGame();
@@ -829,12 +963,40 @@ export default function App() {
         players = players.filter(s => s.sports.includes(teacherGame));
       }
     }
-    
+
     return players;
   }, [eligiblePlayers, scheduleForm.category, userRole, currentTeacherId]);
 
 
+
   // --- Render Views ---
+
+  // Reusable Teacher Game Header Component
+  const TeacherGameHeader = () => {
+    if (userRole !== 'teacher' || !isTeacherLoggedIn) return null;
+    const assignedSport = getTeacherAssignedGame();
+    if (!assignedSport) return null;
+
+    // Get the teacher's name
+    const teacherName = teachers.find(t => t.id === loggedInTeacherId)?.name || 'Teacher';
+
+    return (
+      <Card className="p-8 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-indigo-500 mb-6">
+        <div className="flex items-center gap-6">
+          <Trophy size={48} className="text-indigo-200" />
+          <div className="flex-1">
+            <div className="text-lg font-semibold text-indigo-200 uppercase mb-2">Your Assigned Sport</div>
+            <div className="flex items-center gap-4 mt-2">
+              <div className="text-4xl font-bold text-indigo-100">{assignedSport}</div>
+              <div className="text-4xl font-bold bg-yellow-300 text-slate-800 px-8 py-3 rounded-lg">
+                {teacherName}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
 
   const renderAdmin = () => {
     // Show login page if not logged in
@@ -888,399 +1050,457 @@ export default function App() {
 
     // Show admin panel if logged in
     return (
-    <div className="animate-in fade-in duration-500 space-y-6">
-      {/* Logout Button */}
-      <div className="flex justify-end">
-        <Button onClick={handleAdminLogout} variant="danger">
-          <X size={16} /> Logout
-        </Button>
-      </div>
+      <div className="animate-in fade-in duration-500 space-y-6">
+        {/* Logout Button */}
+        <div className="flex justify-end">
+          <Button onClick={handleAdminLogout} variant="danger">
+            <X size={16} /> Logout
+          </Button>
+        </div>
 
-      {/* Admin Navigation Buttons */}
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={() => setActiveAdminSection('assign')}
-          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
-            activeAdminSection === 'assign'
+        {/* Admin Navigation Buttons */}
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setActiveAdminSection('assign')}
+            className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeAdminSection === 'assign'
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
               : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          Assign Game
-        </button>
-        <button
-          onClick={() => setActiveAdminSection('manageGames')}
-          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
-            activeAdminSection === 'manageGames'
+              }`}
+          >
+            Assign Game
+          </button>
+          <button
+            onClick={() => setActiveAdminSection('manageGames')}
+            className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeAdminSection === 'manageGames'
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
               : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          Manage Games
-        </button>
-        <button
-          onClick={() => setActiveAdminSection('manageTeachers')}
-          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
-            activeAdminSection === 'manageTeachers'
+              }`}
+          >
+            Manage Games
+          </button>
+          <button
+            onClick={() => setActiveAdminSection('manageTeachers')}
+            className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeAdminSection === 'manageTeachers'
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
               : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          Manage Teachers
-        </button>
-      </div>
+              }`}
+          >
+            Manage Teachers
+          </button>
+        </div>
 
-      {/* Assign by Game Section */}
-      {activeAdminSection === 'assign' && teachers.length > 0 && games.length > 0 && (
-        <Card className="p-6 border-indigo-100 shadow-sm overflow-visible">
-          <h3 className="font-semibold text-slate-800 mb-4">Assign Teachers to Game</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-visible">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">Select Game</label>
-              <select
-                id="quickAssignGame"
-                value={selectedGameForAssign}
-                onChange={(e) => {
-                  setSelectedGameForAssign(e.target.value);
-                  setSelectedTeachersForGame([]);
-                }}
-                className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
-              >
-                <option value="">Choose a game...</option>
-                {games.map(game => (
-                  <option key={game} value={game}>
-                    {game}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">Select Teachers</label>
-              <div className="relative" id="teacherDropdownContainer">
-                <button
-                  onClick={() => setOpenTeacherDropdown(!openTeacherDropdown)}
-                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white text-left text-slate-700 font-medium flex justify-between items-center"
+        {/* Assign by Game Section */}
+        {activeAdminSection === 'assign' && teachers.length > 0 && games.length > 0 && (
+          <Card className="p-6 border-indigo-100 shadow-sm overflow-visible">
+            <h3 className="font-semibold text-slate-800 mb-4">Assign Teachers to Game</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-visible">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">Select Game</label>
+                <select
+                  id="quickAssignGame"
+                  value={selectedGameForAssign}
+                  onChange={(e) => {
+                    setSelectedGameForAssign(e.target.value);
+                    setSelectedTeachersForGame([]);
+                  }}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
                 >
-                  <span>{selectedTeachersForGame.length > 0 ? `${selectedTeachersForGame.length} teacher(s) selected` : 'Select teachers...'}</span>
-                  <span className="text-slate-400">▼</span>
-                </button>
-                
-                {openTeacherDropdown && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto">
-                    {(() => {
-                      // Find all teachers assigned to any game
-                      const allAssignedTeacherIds = new Set();
-                      Object.values(gameTeacherAssignments).forEach(teacherIds => {
-                        teacherIds.forEach(id => allAssignedTeacherIds.add(id));
-                      });
-                      
-                      // Filter to show only teachers NOT assigned to any game
-                      const availableTeachers = teachers.filter(teacher => !allAssignedTeacherIds.has(teacher.id));
-                      
-                      if (availableTeachers.length === 0) {
+                  <option value="">Choose a game...</option>
+                  {games.map(game => (
+                    <option key={game} value={game}>
+                      {game}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">Select Teachers</label>
+                <div className="relative" id="teacherDropdownContainer">
+                  <button
+                    onClick={() => setOpenTeacherDropdown(!openTeacherDropdown)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white text-left text-slate-700 font-medium flex justify-between items-center"
+                  >
+                    <span>{selectedTeachersForGame.length > 0 ? `${selectedTeachersForGame.length} teacher(s) selected` : 'Select teachers...'}</span>
+                    <span className="text-slate-400">▼</span>
+                  </button>
+
+                  {openTeacherDropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto">
+                      {(() => {
+                        // Find all teachers assigned to any game
+                        const allAssignedTeacherIds = new Set();
+                        Object.values(gameTeacherAssignments).forEach(teacherIds => {
+                          teacherIds.forEach(id => allAssignedTeacherIds.add(id));
+                        });
+
+                        // Filter to show only teachers NOT assigned to any game
+                        const availableTeachers = teachers.filter(teacher => !allAssignedTeacherIds.has(teacher.id));
+
+                        if (availableTeachers.length === 0) {
+                          return (
+                            <div className="px-4 py-3 text-sm text-slate-500 text-center">
+                              All teachers are already assigned to games
+                            </div>
+                          );
+                        }
+
+                        return availableTeachers.map(teacher => (
+                          <label key={teacher.id} className="flex items-center px-4 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0">
+                            <input
+                              type="checkbox"
+                              checked={selectedTeachersForGame.includes(teacher.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedTeachersForGame([...selectedTeachersForGame, teacher.id]);
+                                } else {
+                                  setSelectedTeachersForGame(selectedTeachersForGame.filter(id => id !== teacher.id));
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-indigo-600 cursor-pointer"
+                            />
+                            <span className="ml-3 text-sm text-slate-700">{teacher.name}</span>
+                          </label>
+                        ));
+                      })()}
+                    </div>
+                  )}
+
+                  {selectedTeachersForGame.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {selectedTeachersForGame.map(teacherId => {
+                        const teacher = teachers.find(t => t.id === teacherId);
                         return (
-                          <div className="px-4 py-3 text-sm text-slate-500 text-center">
-                            All teachers are already assigned to games
-                          </div>
+                          <span key={teacherId} className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-medium rounded-full">
+                            {teacher?.name}
+                            <button
+                              onClick={() => setSelectedTeachersForGame(selectedTeachersForGame.filter(id => id !== teacherId))}
+                              className="hover:text-indigo-900 font-bold"
+                            >
+                              ×
+                            </button>
+                          </span>
                         );
-                      }
-                      
-                      return availableTeachers.map(teacher => (
-                        <label key={teacher.id} className="flex items-center px-4 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0">
-                          <input
-                            type="checkbox"
-                            checked={selectedTeachersForGame.includes(teacher.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedTeachersForGame([...selectedTeachersForGame, teacher.id]);
-                              } else {
-                                setSelectedTeachersForGame(selectedTeachersForGame.filter(id => id !== teacher.id));
-                              }
-                            }}
-                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 cursor-pointer"
-                          />
-                          <span className="ml-3 text-sm text-slate-700">{teacher.name}</span>
-                        </label>
-                      ));
-                    })()}
-                  </div>
-                )}
-                
-                {selectedTeachersForGame.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {selectedTeachersForGame.map(teacherId => {
-                      const teacher = teachers.find(t => t.id === teacherId);
-                      return (
-                        <span key={teacherId} className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-medium rounded-full">
-                          {teacher?.name}
-                          <button
-                            onClick={() => setSelectedTeachersForGame(selectedTeachersForGame.filter(id => id !== teacherId))}
-                            className="hover:text-indigo-900 font-bold"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-          <Button
-            onClick={() => {
-              const selectedGame = selectedGameForAssign;
-              const selectedTeachers = selectedTeachersForGame;
-              
-              if (!selectedGame) {
-                alert('Please select a game');
-                return;
-              }
-              
-              if (selectedTeachers.length === 0) {
-                alert('Please select a teacher');
-                return;
-              }
-              
-              setGameTeacherAssignments({
-                ...gameTeacherAssignments,
-                [selectedGame]: selectedTeachers
-              });
-              
-              setSelectedGameForAssign('');
-              setSelectedTeachersForGame([]);
-              setOpenTeacherDropdown(false);
-              alert(`${selectedTeachers.length} teacher(s) assigned to ${selectedGame}`);
-            }}
-            className="mt-4 w-full"
-          >
-            <Save size={16} /> Assign Teachers to Game
-          </Button>
+            <Button
+              onClick={() => {
+                const selectedGame = selectedGameForAssign;
+                const selectedTeachers = selectedTeachersForGame;
 
-          {/* Game Assignments List */}
-          <div className="mt-6 pt-6 border-t border-slate-200">
-            <h4 className="font-semibold text-slate-800 mb-4">Games with Assigned Teachers</h4>
-            {Object.keys(gameTeacherAssignments).length === 0 ? (
-              <div className="text-center py-4 text-slate-400 text-sm">
-                <p>No teachers assigned to any game yet</p>
+                if (!selectedGame) {
+                  alert('Please select a game');
+                  return;
+                }
+
+                if (selectedTeachers.length === 0) {
+                  alert('Please select a teacher');
+                  return;
+                }
+
+                setGameTeacherAssignments({
+                  ...gameTeacherAssignments,
+                  [selectedGame]: selectedTeachers
+                });
+
+                setSelectedGameForAssign('');
+                setSelectedTeachersForGame([]);
+                setOpenTeacherDropdown(false);
+                alert(`${selectedTeachers.length} teacher(s) assigned to ${selectedGame}`);
+              }}
+              className="mt-4 w-full"
+            >
+              <Save size={16} /> Assign Teachers to Game
+            </Button>
+
+            {/* Game Assignments List */}
+            <div className="mt-6 pt-6 border-t border-slate-200">
+              <h4 className="font-semibold text-slate-800 mb-4">Games with Assigned Teachers</h4>
+              {Object.keys(gameTeacherAssignments).length === 0 ? (
+                <div className="text-center py-4 text-slate-400 text-sm">
+                  <p>No teachers assigned to any game yet</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {games.map(game => {
+                    const assignedTeachers = gameTeacherAssignments[game] || [];
+                    if (assignedTeachers.length === 0) return null;
+
+                    const teacherNames = assignedTeachers
+                      .map(id => teachers.find(t => t.id === id)?.name)
+                      .filter(Boolean);
+
+                    return (
+                      <div key={game} className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <div className="font-medium text-emerald-900 mb-2">{game}</div>
+                        <div className="flex flex-wrap gap-2">
+                          {teacherNames.map((name, idx) => (
+                            <span key={idx} className="inline-flex items-center px-2 py-1 bg-emerald-200 text-emerald-800 text-xs font-semibold rounded">
+                              ✓ {name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {activeAdminSection === 'assign' && (teachers.length === 0 || games.length === 0) && (
+          <Card className="p-6 bg-amber-50 border-amber-200">
+            <div className="flex gap-3">
+              <AlertCircle className="text-amber-600 flex-shrink-0" size={20} />
+              <div className="text-sm text-amber-800">
+                <p className="font-semibold">Add Games and Teachers First</p>
+                <p className="text-amber-700 mt-1">You need to add at least one game and one teacher before you can assign them.</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Manage Games Section */}
+        {activeAdminSection === 'manageGames' && (
+          <>
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-slate-800">Manage Games</h2>
+              <Button onClick={resetGames} variant="secondary" className="text-xs">
+                <RotateCcw size={14} /> Reset to Default
+              </Button>
+            </div>
+
+            <Card className="p-6 border-indigo-100 shadow-sm">
+              <h3 className="font-semibold text-slate-800 mb-4">Add New Game</h3>
+              <div className="flex gap-2">
+                <Input
+                  value={newGameName}
+                  onChange={e => setNewGameName(e.target.value)}
+                  placeholder="e.g., Relay Race, Tug of War, etc."
+                  onKeyPress={(e) => e.key === 'Enter' && addGame()}
+                />
+                <Button onClick={addGame} className="px-6">
+                  <Plus size={16} /> Add
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="overflow-hidden">
+              <div className="bg-slate-50 border-b border-slate-100 p-4">
+                <h3 className="font-semibold text-slate-800">Current Games List</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {games.length} game{games.length !== 1 ? 's' : ''} available for registration
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+                {games.length === 0 ? (
+                  <div className="col-span-full text-center py-8 text-slate-400">
+                    <AlertCircle className="mx-auto mb-2" size={40} />
+                    <p>No games added yet. Start by adding your first game!</p>
+                  </div>
+                ) : (
+                  games.map(game => (
+                    <div key={game} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors">
+                      <div className="flex-1">
+                        <span className="font-medium text-slate-800">{game}</span>
+                        <div className="text-xs text-slate-500 mt-1">Players per match: <span className="font-bold text-indigo-600">{getGamePlayerCount(game)}</span></div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => updateGamePlayerCount(game, Math.max(2, getGamePlayerCount(game) - 1))}
+                            className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
+                            title="Decrease players"
+                          >
+                            −
+                          </button>
+                          <input
+                            type="number"
+                            min="2"
+                            max="20"
+                            value={getGamePlayerCount(game)}
+                            onChange={(e) => updateGamePlayerCount(game, Math.max(2, parseInt(e.target.value) || 2))}
+                            className="w-12 px-2 py-1 text-xs text-center border border-slate-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200"
+                          />
+                          <button
+                            onClick={() => updateGamePlayerCount(game, Math.min(20, getGamePlayerCount(game) + 1))}
+                            className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
+                            title="Increase players"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => removeGame(game)}
+                          className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
+                          title="Remove Game"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </>
+        )}
+
+        {/* Manage Teachers Section */}
+        {activeAdminSection === 'manageTeachers' && (
+          <Card className="p-6 border-indigo-100 shadow-sm">
+            <h3 className="font-semibold text-slate-800 mb-4">Manage Teachers & Credentials</h3>
+
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-indigo-800 font-semibold mb-2">Add New Teacher</p>
+              <p className="text-xs text-indigo-700 mb-4">Create login credentials for each teacher. Teachers will use these to access their assigned games.</p>
+
+              <div className="space-y-3">
+                <Input
+                  value={newTeacherName}
+                  onChange={e => setNewTeacherName(e.target.value)}
+                  placeholder="Teacher Name (e.g., Mr. Sharma, Mrs. Patel)"
+                />
+                <Input
+                  value={newTeacherUsername}
+                  onChange={e => setNewTeacherUsername(e.target.value)}
+                  placeholder="Username for login (e.g., sharma_mr)"
+                />
+                <Input
+                  type="password"
+                  value={newTeacherPassword}
+                  onChange={e => setNewTeacherPassword(e.target.value)}
+                  placeholder="Password for login"
+                  onKeyPress={(e) => e.key === 'Enter' && addTeacher()}
+                />
+                <Input
+                  value={newTeacherBranch}
+                  onChange={e => setNewTeacherBranch(e.target.value)}
+                  placeholder="Branch (e.g., A, B, C or Science, Commerce)"
+                />
+                <Button onClick={addTeacher} className="w-full">
+                  <Plus size={16} /> Add Teacher with Credentials
+                </Button>
+              </div>
+            </div>
+
+            {teachers.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-sm">
+                <AlertCircle className="mx-auto mb-2" size={32} />
+                <p>No teachers added yet. Add your first teacher to assign them to games.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {games.map(game => {
-                  const assignedTeachers = gameTeacherAssignments[game] || [];
-                  if (assignedTeachers.length === 0) return null;
-                  
-                  const teacherNames = assignedTeachers
-                    .map(id => teachers.find(t => t.id === id)?.name)
-                    .filter(Boolean);
-                  
+              <div className="grid grid-cols-1 gap-3">
+                {teachers.map(teacher => {
+                  const creds = teacherCredentials[teacher.id];
+                  const assignedGame = Object.entries(gameTeacherAssignments).find(([_, teacherIds]) =>
+                    teacherIds.includes(teacher.id)
+                  )?.[0];
+
                   return (
-                    <div key={game} className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                      <div className="font-medium text-emerald-900 mb-2">{game}</div>
-                      <div className="flex flex-wrap gap-2">
-                        {teacherNames.map((name, idx) => (
-                          <span key={idx} className="inline-flex items-center px-2 py-1 bg-emerald-200 text-emerald-800 text-xs font-semibold rounded">
-                            ✓ {name}
-                          </span>
-                        ))}
+                    <div key={teacher.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="font-bold text-slate-800">{teacher.name}</div>
+                            {teacher.branch && (
+                              <Badge color="indigo">Branch {teacher.branch}</Badge>
+                            )}
+                          </div>
+                          {creds && (
+                            <div className="text-xs text-slate-600 mt-1 space-y-0.5">
+                              <div><span className="font-semibold">Username:</span> {creds.username}</div>
+                              <div><span className="font-semibold">Password:</span> {creds.password}</div>
+                            </div>
+                          )}
+                          {assignedGame && (
+                            <div className="text-xs text-indigo-600 font-semibold mt-1">Assigned to: {assignedGame}</div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startEditTeacher(teacher.id)}
+                            className="p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 rounded transition-colors"
+                            title="Edit Teacher"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => removeTeacher(teacher.id)}
+                            className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
+                            title="Remove Teacher"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
-          </div>
-        </Card>
-      )}
 
-      {activeAdminSection === 'assign' && (teachers.length === 0 || games.length === 0) && (
-        <Card className="p-6 bg-amber-50 border-amber-200">
-          <div className="flex gap-3">
-            <AlertCircle className="text-amber-600 flex-shrink-0" size={20} />
-            <div className="text-sm text-amber-800">
-              <p className="font-semibold">Add Games and Teachers First</p>
-              <p className="text-amber-700 mt-1">You need to add at least one game and one teacher before you can assign them.</p>
-            </div>
-          </div>
-        </Card>
-      )}
+            {/* Edit Teacher Modal */}
+            {editingTeacherId && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                <Card className="w-full max-w-md p-6 border-indigo-200 shadow-lg">
+                  <h4 className="font-bold text-slate-800 mb-4">Edit Teacher</h4>
 
-      {/* Manage Games Section */}
-      {activeAdminSection === 'manageGames' && (
-        <>
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-bold text-slate-800">Manage Games</h2>
-            <Button onClick={resetGames} variant="secondary" className="text-xs">
-              <RotateCcw size={14} /> Reset to Default
-            </Button>
-          </div>
+                  <div className="space-y-3 mb-4">
+                    <Input
+                      value={editTeacherName}
+                      onChange={e => setEditTeacherName(e.target.value)}
+                      placeholder="Teacher Name"
+                    />
+                    <Input
+                      value={editTeacherUsername}
+                      onChange={e => setEditTeacherUsername(e.target.value)}
+                      placeholder="Username"
+                    />
+                    <Input
+                      type="password"
+                      value={editTeacherPassword}
+                      onChange={e => setEditTeacherPassword(e.target.value)}
+                      placeholder="Password"
+                    />
+                    <Input
+                      value={editTeacherBranch}
+                      onChange={e => setEditTeacherBranch(e.target.value)}
+                      placeholder="Branch (e.g., A, B, C or Science, Commerce)"
+                    />
+                  </div>
 
-          <Card className="p-6 border-indigo-100 shadow-sm">
-            <h3 className="font-semibold text-slate-800 mb-4">Add New Game</h3>
-            <div className="flex gap-2">
-              <Input
-                value={newGameName}
-                onChange={e => setNewGameName(e.target.value)}
-                placeholder="e.g., Relay Race, Tug of War, etc."
-                onKeyPress={(e) => e.key === 'Enter' && addGame()}
-              />
-              <Button onClick={addGame} className="px-6">
-                <Plus size={16} /> Add
-              </Button>
+                  <div className="flex gap-3">
+                    <Button onClick={saveTeacher} className="flex-1 bg-emerald-500 hover:bg-emerald-600">
+                      <Save size={16} /> Save
+                    </Button>
+                    <Button onClick={cancelEditTeacher} variant="secondary" className="flex-1">
+                      <X size={16} /> Cancel
+                    </Button>
+                  </div>
+                </Card>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Info Box */}
+        {activeAdminSection === 'manageGames' && (
+          <Card className="p-4 bg-blue-50 border-blue-100 border">
+            <div className="flex gap-3">
+              <CheckCircle2 size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-800">
+                <p className="font-semibold mb-1">Games will appear in Registration Form</p>
+                <p className="text-blue-700">Any game you add or remove here will automatically be updated in the student registration form and match scheduling options.</p>
+              </div>
             </div>
           </Card>
-
-          <Card className="overflow-hidden">
-            <div className="bg-slate-50 border-b border-slate-100 p-4">
-              <h3 className="font-semibold text-slate-800">Current Games List</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                {games.length} game{games.length !== 1 ? 's' : ''} available for registration
-              </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
-              {games.length === 0 ? (
-                <div className="col-span-full text-center py-8 text-slate-400">
-                  <AlertCircle className="mx-auto mb-2" size={40} />
-                  <p>No games added yet. Start by adding your first game!</p>
-                </div>
-              ) : (
-                games.map(game => (
-                  <div key={game} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors">
-                    <div className="flex-1">
-                      <span className="font-medium text-slate-800">{game}</span>
-                      <div className="text-xs text-slate-500 mt-1">Players per match: <span className="font-bold text-indigo-600">{getGamePlayerCount(game)}</span></div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => updateGamePlayerCount(game, Math.max(2, getGamePlayerCount(game) - 1))}
-                          className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
-                          title="Decrease players"
-                        >
-                          −
-                        </button>
-                        <input
-                          type="number"
-                          min="2"
-                          max="20"
-                          value={getGamePlayerCount(game)}
-                          onChange={(e) => updateGamePlayerCount(game, Math.max(2, parseInt(e.target.value) || 2))}
-                          className="w-12 px-2 py-1 text-xs text-center border border-slate-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200"
-                        />
-                        <button
-                          onClick={() => updateGamePlayerCount(game, Math.min(20, getGamePlayerCount(game) + 1))}
-                          className="px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded transition-colors"
-                          title="Increase players"
-                        >
-                          +
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => removeGame(game)}
-                        className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
-                        title="Remove Game"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </>
-      )}
-
-      {/* Manage Teachers Section */}
-      {activeAdminSection === 'manageTeachers' && (
-        <Card className="p-6 border-indigo-100 shadow-sm">
-          <h3 className="font-semibold text-slate-800 mb-4">Manage Teachers & Credentials</h3>
-          
-          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
-            <p className="text-sm text-indigo-800 font-semibold mb-2">Add New Teacher</p>
-            <p className="text-xs text-indigo-700 mb-4">Create login credentials for each teacher. Teachers will use these to access their assigned games.</p>
-            
-            <div className="space-y-3">
-              <Input
-                value={newTeacherName}
-                onChange={e => setNewTeacherName(e.target.value)}
-                placeholder="Teacher Name (e.g., Mr. Sharma, Mrs. Patel)"
-              />
-              <Input
-                value={newTeacherUsername}
-                onChange={e => setNewTeacherUsername(e.target.value)}
-                placeholder="Username for login (e.g., sharma_mr)"
-              />
-              <Input
-                type="password"
-                value={newTeacherPassword}
-                onChange={e => setNewTeacherPassword(e.target.value)}
-                placeholder="Password for login"
-                onKeyPress={(e) => e.key === 'Enter' && addTeacher()}
-              />
-              <Button onClick={addTeacher} className="w-full">
-                <Plus size={16} /> Add Teacher with Credentials
-              </Button>
-            </div>
-          </div>
-          
-          {teachers.length === 0 ? (
-            <div className="text-center py-6 text-slate-400 text-sm">
-              <AlertCircle className="mx-auto mb-2" size={32} />
-              <p>No teachers added yet. Add your first teacher to assign them to games.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3">
-              {teachers.map(teacher => {
-                const creds = teacherCredentials[teacher.id];
-                const assignedGame = Object.entries(gameTeacherAssignments).find(([_, teacherIds]) => 
-                  teacherIds.includes(teacher.id)
-                )?.[0];
-                
-                return (
-                  <div key={teacher.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="font-bold text-slate-800">{teacher.name}</div>
-                        {creds && (
-                          <div className="text-xs text-slate-600 mt-1 space-y-0.5">
-                            <div><span className="font-semibold">Username:</span> {creds.username}</div>
-                            <div><span className="font-semibold">Password:</span> {creds.password}</div>
-                          </div>
-                        )}
-                        {assignedGame && (
-                          <div className="text-xs text-indigo-600 font-semibold mt-1">Assigned to: {assignedGame}</div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => removeTeacher(teacher.id)}
-                        className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
-                        title="Remove Teacher"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* Info Box */}
-      {activeAdminSection === 'manageGames' && (
-        <Card className="p-4 bg-blue-50 border-blue-100 border">
-          <div className="flex gap-3">
-            <CheckCircle2 size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-blue-800">
-              <p className="font-semibold mb-1">Games will appear in Registration Form</p>
-              <p className="text-blue-700">Any game you add or remove here will automatically be updated in the student registration form and match scheduling options.</p>
-            </div>
-          </div>
-        </Card>
-      )}
-    </div>
+        )}
+      </div>
     );
   };
 
@@ -1331,109 +1551,199 @@ export default function App() {
 
   // --- Render Views ---
 
-  const renderDashboard = () => (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="p-4 bg-gradient-to-br from-indigo-50 to-white border-indigo-100">
-          <div className="text-indigo-600 mb-2"><Users size={24} /></div>
-          <div className="text-2xl font-bold text-slate-800">{stats.totalStudents}</div>
-          <div className="text-xs font-semibold text-slate-500 uppercase">Total Participants</div>
-        </Card>
-        <Card className="p-4 bg-gradient-to-br from-emerald-50 to-white border-emerald-100">
-          <div className="text-emerald-600 mb-2"><Trophy size={24} /></div>
-          <div className="text-2xl font-bold text-slate-800">{stats.matchesFinished}</div>
-          <div className="text-xs font-semibold text-slate-500 uppercase">Matches Completed</div>
-        </Card>
-        <Card className="p-4 bg-gradient-to-br from-amber-50 to-white border-amber-100">
-          <div className="text-amber-600 mb-2"><Calendar size={24} /></div>
-          <div className="text-2xl font-bold text-slate-800">{stats.matchesPending}</div>
-          <div className="text-xs font-semibold text-slate-500 uppercase">Scheduled</div>
-        </Card>
-        <Card className="p-4 bg-gradient-to-br from-purple-50 to-white border-purple-100">
-          <div className="text-purple-600 mb-2"><Activity size={24} /></div>
-          <div className="text-2xl font-bold text-slate-800">
-            {matches.length > 0 ? Math.round((stats.matchesFinished / stats.totalMatches) * 100) : 0}%
-          </div>
-          <div className="text-xs font-semibold text-slate-500 uppercase">Progress</div>
-        </Card>
-      </div>
+  const renderDashboard = () => {
+    const assignedSport = getTeacherAssignedGame();
+    const teacherMatches = getTeacherMatches();
+    const teacherStudents = getTeacherStudents();
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Participation Breakdown */}
-        <Card className="p-6">
-          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <Users size={18} className="text-indigo-500" /> Category Breakdown
-          </h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 text-sm font-medium">Junior (Class 1-3)</span>
-              <div className="flex items-center gap-2">
-                <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-400" style={{ width: `${(stats.byCategory.juniors / (stats.totalStudents || 1)) * 100}%` }}></div>
-                </div>
-                <span className="text-sm font-bold text-slate-700">{stats.byCategory.juniors}</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 text-sm font-medium">Middle (Class 4-6)</span>
-              <div className="flex items-center gap-2">
-                <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-400" style={{ width: `${(stats.byCategory.middle / (stats.totalStudents || 1)) * 100}%` }}></div>
-                </div>
-                <span className="text-sm font-bold text-slate-700">{stats.byCategory.middle}</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 text-sm font-medium">Senior (Class 7-10)</span>
-              <div className="flex items-center gap-2">
-                <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-purple-400" style={{ width: `${(stats.byCategory.seniors / (stats.totalStudents || 1)) * 100}%` }}></div>
-                </div>
-                <span className="text-sm font-bold text-slate-700">{stats.byCategory.seniors}</span>
-              </div>
-            </div>
-          </div>
-        </Card>
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <TeacherGameHeader />
 
-        {/* Recent Results */}
-        <Card className="p-6">
-          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <Medal size={18} className="text-amber-500" /> Recent Winners
-          </h3>
-          <div className="space-y-3">
-            {matches.filter(m => m.status === 'finished').slice(-4).reverse().map(match => {
-              let winnerDisplay = '';
-              if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
-                // For team games, show both winners
-                const winners = students.filter(s => match.winnerId.includes(s.id));
-                winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
-              } else {
-                // For individual games, show single winner
-                const winner = students.find(s => s.id === match.winnerId);
-                winnerDisplay = winner?.name || 'Unknown';
-              }
-              return (
-                <div key={match.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                  <div>
-                    <div className="font-bold text-slate-800 text-sm">{winnerDisplay}</div>
-                    <div className="text-xs text-slate-500">{match.sport} • {match.category}</div>
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card
+            className="p-4 bg-gradient-to-br from-indigo-50 to-white border-indigo-100 cursor-pointer hover:shadow-lg hover:scale-105 transition-all duration-200"
+            onClick={() => setActiveTab('participants')}
+          >
+            <div className="text-indigo-600 mb-2"><Users size={24} /></div>
+            <div className="text-2xl font-bold text-slate-800">{stats.totalStudents}</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase">
+              {userRole === 'teacher' && isTeacherLoggedIn ? `Participants in ${assignedSport}` : 'Total Participants'}
+            </div>
+          </Card>
+          <Card
+            className="p-4 bg-gradient-to-br from-emerald-50 to-white border-emerald-100 cursor-pointer hover:shadow-lg hover:scale-105 transition-all duration-200"
+            onClick={() => setActiveTab('results')}
+          >
+            <div className="text-emerald-600 mb-2"><Trophy size={24} /></div>
+            <div className="text-2xl font-bold text-slate-800">{stats.matchesFinished}</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase">Matches Completed</div>
+          </Card>
+          <Card
+            className="p-4 bg-gradient-to-br from-amber-50 to-white border-amber-100 cursor-pointer hover:shadow-lg hover:scale-105 transition-all duration-200"
+            onClick={() => setActiveTab('scheduler')}
+          >
+            <div className="text-amber-600 mb-2"><Calendar size={24} /></div>
+            <div className="text-2xl font-bold text-slate-800">{stats.matchesPending}</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase">Scheduled</div>
+          </Card>
+          <Card className="p-4 bg-gradient-to-br from-purple-50 to-white border-purple-100">
+            <div className="text-purple-600 mb-2"><Activity size={24} /></div>
+            <div className="text-2xl font-bold text-slate-800">
+              {stats.totalMatches > 0 ? Math.round((stats.matchesFinished / stats.totalMatches) * 100) : 0}%
+            </div>
+            <div className="text-xs font-semibold text-slate-500 uppercase">Progress</div>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Participation Breakdown */}
+          <Card className="p-6">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Users size={18} className="text-indigo-500" /> Category Breakdown
+            </h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600 text-sm font-medium">Junior (Class 1-3)</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-400" style={{ width: `${(stats.byCategory.juniors / (stats.totalStudents || 1)) * 100}%` }}></div>
                   </div>
-                  <Badge color="orange">Winner{match.sport === 'Carrom (2vs2)' ? 's' : ''}</Badge>
+                  <span className="text-sm font-bold text-slate-700">{stats.byCategory.juniors}</span>
                 </div>
-              );
-            })}
-            {matches.filter(m => m.status === 'finished').length === 0 && (
-              <p className="text-sm text-slate-400 italic">No matches completed yet.</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600 text-sm font-medium">Middle (Class 4-6)</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-400" style={{ width: `${(stats.byCategory.middle / (stats.totalStudents || 1)) * 100}%` }}></div>
+                  </div>
+                  <span className="text-sm font-bold text-slate-700">{stats.byCategory.middle}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600 text-sm font-medium">Senior (Class 7-10)</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-400" style={{ width: `${(stats.byCategory.seniors / (stats.totalStudents || 1)) * 100}%` }}></div>
+                  </div>
+                  <span className="text-sm font-bold text-slate-700">{stats.byCategory.seniors}</span>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Recent Results */}
+          <Card className="p-6">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <Medal size={18} className="text-amber-500" /> Recent Winners
+              </span>
+              <button
+                onClick={() => setActiveTab('results')}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+              >
+                View All →
+              </button>
+            </h3>
+            <div className="space-y-3">
+              {teacherMatches.filter(m => m.status === 'finished').slice(-4).reverse().map(match => {
+                let winnerDisplay = '';
+                if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
+                  // For team games, show both winners
+                  const winners = students.filter(s => match.winnerId.includes(s.id));
+                  winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
+                } else {
+                  // For individual games, show single winner
+                  const winner = students.find(s => s.id === match.winnerId);
+                  winnerDisplay = winner?.name || 'Unknown';
+                }
+                return (
+                  <div
+                    key={match.id}
+                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-amber-50 hover:border-amber-200 transition-colors cursor-pointer border border-transparent"
+                    onClick={() => setSelectedStudentId(students.find(s => s.id === match.winnerId)?.id)}
+                  >
+                    <div>
+                      <div className="font-bold text-slate-800 text-sm">{winnerDisplay}</div>
+                      <div className="text-xs text-slate-500">{match.sport} • {match.category}</div>
+                    </div>
+                    <Badge color="orange">Winner{match.sport === 'Carrom (2vs2)' ? 's' : ''}</Badge>
+                  </div>
+                );
+              })}
+              {teacherMatches.filter(m => m.status === 'finished').length === 0 && (
+                <p className="text-sm text-slate-400 italic">No matches completed yet.</p>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* Quick Actions */}
+        <Card className="p-6 bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200">
+          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <Zap size={18} className="text-indigo-600" /> Quick Actions
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {userRole === 'admin' && (
+              <>
+                <button
+                  onClick={() => setActiveTab('register')}
+                  className="p-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-lg text-left transition-all hover:shadow-md"
+                >
+                  <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                    <UserPlus size={16} className="text-indigo-600" /> Add Student
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">Register a new participant</div>
+                </button>
+                <button
+                  onClick={() => setActiveTab('dummy')}
+                  className="p-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-lg text-left transition-all hover:shadow-md"
+                >
+                  <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                    <Zap size={16} className="text-amber-600" /> Generate Data
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">Create dummy participants</div>
+                </button>
+              </>
             )}
+            <button
+              onClick={() => setActiveTab('scheduler')}
+              className="p-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-lg text-left transition-all hover:shadow-md"
+            >
+              <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                <Calendar size={16} className="text-emerald-600" /> Schedule Match
+              </div>
+              <div className="text-xs text-slate-500 mt-1">Organize a competition</div>
+            </button>
+            <button
+              onClick={() => setActiveTab('results')}
+              className="p-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-lg text-left transition-all hover:shadow-md"
+            >
+              <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                <Medal size={16} className="text-orange-600" /> View Results
+              </div>
+              <div className="text-xs text-slate-500 mt-1">See all match results</div>
+            </button>
+            <button
+              onClick={() => setActiveTab('participants')}
+              className="p-3 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-lg text-left transition-all hover:shadow-md"
+            >
+              <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                <Users size={16} className="text-blue-600" /> All Participants
+              </div>
+              <div className="text-xs text-slate-500 mt-1">View participant list</div>
+            </button>
           </div>
         </Card>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderRegistration = () => (
     <div className="max-w-xl mx-auto animate-in fade-in duration-500">
+      <TeacherGameHeader />
       <Card className="p-6 border-indigo-100 shadow-md">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
@@ -1480,10 +1790,10 @@ export default function App() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Class (4-10)</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Class (1-10)</label>
                 <Input
                   type="number"
-                  min="4" max="10"
+                  min="1" max="10"
                   value={regForm.classVal}
                   onChange={e => setRegForm({ ...regForm, classVal: e.target.value })}
                   placeholder="Class"
@@ -1651,8 +1961,107 @@ export default function App() {
     </div >
   );
 
+  const renderMyGame = () => {
+    const assignedSport = getTeacherAssignedGame();
+    const myGameStudentsRaw = getTeacherStudents();
+    // Sort students: junior to senior, then girls to boys
+    const myGameStudents = sortStudents(myGameStudentsRaw);
+
+    return (
+      <div className="animate-in fade-in duration-500 space-y-6">
+        <TeacherGameHeader />
+
+        {/* Students Count */}
+        <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+          <CheckCircle2 size={16} className="text-emerald-500" />
+          Total <strong>{myGameStudents.length}</strong> student{myGameStudents.length !== 1 ? 's' : ''} in {assignedSport}
+        </div>
+
+        {/* My Game Students Table */}
+        <Card className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                <th className="p-4 font-semibold w-12">S.No</th>
+                <th className="p-4 font-semibold">Roll No</th>
+                <th className="p-4 font-semibold">Photo</th>
+                <th className="p-4 font-semibold">Name</th>
+                <th className="p-4 font-semibold">Class</th>
+                <th className="p-4 font-semibold">Category</th>
+                <th className="p-4 font-semibold">Gender</th>
+                <th className="p-4 font-semibold">Father's Name</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {myGameStudents.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="p-8 text-center text-slate-400">
+                    No students registered for {assignedSport} yet.
+                  </td>
+                </tr>
+              ) : (
+                myGameStudents.map((student, index) => (
+                  <tr key={student.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-4 font-bold text-slate-600 text-center">{index + 1}</td>
+                    <td className="p-4 font-bold text-slate-800">{student.rollNumber}</td>
+                    <td className="p-4">
+                      {student.photo ? (
+                        <button
+                          onClick={() => setPreviewImage(student.photo)}
+                          className="cursor-pointer hover:opacity-80 transition-opacity"
+                        >
+                          <img
+                            src={student.photo}
+                            alt={student.name}
+                            className="w-10 h-10 rounded-full object-cover border border-indigo-200"
+                          />
+                        </button>
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center border border-slate-300">
+                          <Users size={16} className="text-slate-400" />
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-4 font-bold text-slate-800">
+                      <button
+                        onClick={() => setSelectedStudentId(student.id)}
+                        className="text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer transition-colors"
+                      >
+                        {student.name}
+                      </button>
+                    </td>
+                    <td className="p-4 text-slate-600">{student.classVal}</td>
+                    <td className="p-4"><Badge color="slate">{student.category}</Badge></td>
+                    <td className="p-4 text-slate-600">{student.gender}</td>
+                    <td className="p-4 text-slate-600 text-xs">{student.fatherName}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </Card>
+
+        {/* Image Preview Modal */}
+        {previewImage && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="relative max-w-2xl">
+              <button
+                onClick={() => setPreviewImage(null)}
+                className="absolute top-2 right-2 bg-white rounded-full p-2 hover:bg-slate-100 transition-colors"
+              >
+                <X size={24} />
+              </button>
+              <img src={previewImage} alt="Preview" className="max-h-96 rounded-lg" />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderParticipants = () => (
     <div className="animate-in fade-in duration-500 space-y-6">
+      <TeacherGameHeader />
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-slate-800">Participants</h2>
         <div className="flex gap-2">
@@ -1666,6 +2075,31 @@ export default function App() {
           </Button>
         </div>
       </div>
+
+      {/* View Mode Toggle (for teachers) */}
+      {userRole === 'teacher' && (
+        <Card className="p-4 bg-blue-50 border-blue-100">
+          <div className="space-y-2">
+            <span className="text-sm font-semibold text-blue-900 block">View:</span>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setParticipantsViewMode('my-game')}
+                variant={participantsViewMode === 'my-game' ? 'primary' : 'secondary'}
+                className="text-sm px-3 py-2 flex-1"
+              >
+                <Trophy size={14} /> My Game
+              </Button>
+              <Button
+                onClick={() => setParticipantsViewMode('all-games')}
+                variant={participantsViewMode === 'all-games' ? 'primary' : 'secondary'}
+                className="text-sm px-3 py-2 flex-1"
+              >
+                <Users size={14} /> All Games
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Search Section */}
       <Card className="p-4 bg-indigo-50 border-indigo-100 shadow-sm">
@@ -1710,7 +2144,7 @@ export default function App() {
             <Select
               value={filters.classVal}
               onChange={e => setFilters({ ...filters, classVal: e.target.value })}
-              options={Array.from({ length: 7 }, (_, i) => i + 4).map(c => ({ value: c.toString(), label: `Class ${c}` }))}
+              options={Array.from({ length: 10 }, (_, i) => i + 1).map(c => ({ value: c.toString(), label: `Class ${c}` }))}
               placeholder="All Classes"
             />
           </div>
@@ -1736,6 +2170,7 @@ export default function App() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="bg-slate-50 text-slate-500 border-b border-slate-100">
+              <th className="p-4 font-semibold w-12">S.No</th>
               <th className="p-4 font-semibold">Roll No</th>
               <th className="p-4 font-semibold">Photo</th>
               <th className="p-4 font-semibold">Name</th>
@@ -1750,13 +2185,14 @@ export default function App() {
           <tbody className="divide-y divide-slate-100">
             {filteredStudentsList.length === 0 ? (
               <tr>
-                <td colSpan={userRole === 'admin' ? '9' : '8'} className="p-8 text-center text-slate-400">
+                <td colSpan={userRole === 'admin' ? '10' : '9'} className="p-8 text-center text-slate-400">
                   No participants match your filters.
                 </td>
               </tr>
             ) : (
-              filteredStudentsList.map(student => (
+              filteredStudentsList.map((student, index) => (
                 <tr key={student.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-4 font-bold text-slate-600 text-center">{index + 1}</td>
                   <td className="p-4 font-bold text-slate-800">{student.rollNumber}</td>
                   <td className="p-4">
                     {student.photo ? (
@@ -1764,8 +2200,8 @@ export default function App() {
                         onClick={() => setPreviewImage(student.photo)}
                         className="cursor-pointer hover:opacity-80 transition-opacity"
                       >
-                        <img 
-                          src={student.photo} 
+                        <img
+                          src={student.photo}
                           alt={student.name}
                           className="w-10 h-10 rounded-full object-cover border border-indigo-200"
                         />
@@ -1777,7 +2213,7 @@ export default function App() {
                     )}
                   </td>
                   <td className="p-4 font-bold text-slate-800">
-                    <button 
+                    <button
                       onClick={() => setSelectedStudentId(student.id)}
                       className="text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer transition-colors"
                     >
@@ -1797,7 +2233,7 @@ export default function App() {
                         } else if (status === 'played') {
                           statusColor = 'bg-green-100 text-green-700 border-green-200'; // played
                         }
-                        
+
                         return (
                           <span key={s} className={`px-1.5 py-0.5 rounded text-xs border font-medium ${statusColor}`}>
                             {s}
@@ -1838,16 +2274,16 @@ export default function App() {
       {selectedStudentId && (() => {
         const student = students.find(s => s.id === selectedStudentId);
         if (!student) return null;
-        
+
         const matchesForStudent = matches.filter(m => m.playerIds && m.playerIds.includes(student.id));
-        
+
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <Card className="max-w-2xl w-full">
               <div className="p-6">
                 <div className="flex justify-between items-start mb-6">
                   <h2 className="text-2xl font-bold text-slate-800">Student Profile</h2>
-                  <button 
+                  <button
                     onClick={() => setSelectedStudentId(null)}
                     className="text-slate-400 hover:text-slate-600 transition-colors"
                   >
@@ -1863,8 +2299,8 @@ export default function App() {
                         onClick={() => setPreviewImage(student.photo)}
                         className="cursor-pointer hover:opacity-80 transition-opacity"
                       >
-                        <img 
-                          src={student.photo} 
+                        <img
+                          src={student.photo}
                           alt={student.name}
                           className="w-40 h-40 rounded-full object-cover border-4 border-indigo-200 mb-4 hover:shadow-lg transition-shadow"
                         />
@@ -1917,7 +2353,7 @@ export default function App() {
                           } else if (status === 'played') {
                             statusColor = 'green'; // played
                           }
-                          
+
                           return (
                             <Badge key={s} color={statusColor}>{s}</Badge>
                           );
@@ -1943,10 +2379,12 @@ export default function App() {
                 </div>
 
                 <div className="mt-6 pt-6 border-t border-slate-200 flex gap-2">
-                  <Button onClick={() => { startEdit(student); setSelectedStudentId(null); }} variant="primary" className="flex-1">
-                    <Pencil size={16} /> Edit Profile
-                  </Button>
-                  <Button onClick={() => setSelectedStudentId(null)} variant="secondary" className="flex-1">
+                  {userRole === 'admin' && (
+                    <Button onClick={() => { startEdit(student); setSelectedStudentId(null); }} variant="primary" className="flex-1">
+                      <Pencil size={16} /> Edit Profile
+                    </Button>
+                  )}
+                  <Button onClick={() => setSelectedStudentId(null)} variant={userRole === 'admin' ? 'secondary' : 'primary'} className="flex-1">
                     Close
                   </Button>
                 </div>
@@ -1960,12 +2398,12 @@ export default function App() {
       {previewImage && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
           <div className="relative flex flex-col items-center">
-            <img 
-              src={previewImage} 
+            <img
+              src={previewImage}
               alt="Preview"
               className="max-w-lg max-h-96 rounded-lg object-contain"
             />
-            <button 
+            <button
               onClick={() => setPreviewImage(null)}
               className="absolute top-2 right-2 bg-white rounded-full p-2 hover:bg-slate-200 transition-colors shadow-lg"
             >
@@ -1994,9 +2432,9 @@ export default function App() {
               value={filters.category}
               onChange={e => setFilters({ ...filters, category: e.target.value })}
               options={[
-                { value: 'Juniors (4-5)', label: 'Juniors (4-5)' },
-                { value: 'Middle (6-7)', label: 'Middle (6-7)' },
-                { value: 'Seniors (8-10)', label: 'Seniors (8-10)' }
+                { value: 'Junior (1-3)', label: 'Junior (1-3)' },
+                { value: 'Middle (4-6)', label: 'Middle (4-6)' },
+                { value: 'Senior (7-10)', label: 'Senior (7-10)' }
               ]}
               placeholder="All Categories"
             />
@@ -2018,7 +2456,7 @@ export default function App() {
             <Select
               value={filters.classVal}
               onChange={e => setFilters({ ...filters, classVal: e.target.value })}
-              options={Array.from({ length: 7 }, (_, i) => i + 4).map(c => ({ value: c.toString(), label: `Class ${c}` }))}
+              options={Array.from({ length: 10 }, (_, i) => i + 1).map(c => ({ value: c.toString(), label: `Class ${c}` }))}
               placeholder="All Classes"
             />
           </div>
@@ -2083,314 +2521,602 @@ export default function App() {
   );
 
   const renderScheduler = () => {
-    const displayMatches = userRole === 'teacher' && currentTeacherId 
-      ? getTeacherMatches() 
+    let displayMatches = userRole === 'teacher' && isTeacherLoggedIn
+      ? getTeacherMatches()
       : matches;
-    
-    const teacherAssignedGame = userRole === 'teacher' && currentTeacherId ? getTeacherAssignedGame() : null;
+
+    // Apply comprehensive filters if any are selected
+    displayMatches = displayMatches.filter(match => {
+      // Get all players in this match
+      const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
+      if (matchPlayers.length === 0) return false;
+
+      // Check sport filter
+      const matchSport = matchFilters.sport ? match.sport === matchFilters.sport : true;
+
+      // Check category filter - match if ANY player matches the category
+      const matchCategory = matchFilters.category
+        ? matchPlayers.some(p => p.category === matchFilters.category)
+        : true;
+
+      // Check gender filter - match if ANY player matches the gender
+      const matchGender = matchFilters.gender
+        ? matchPlayers.some(p => p.gender === matchFilters.gender)
+        : true;
+
+      // Check class filter - match if ANY player matches the class
+      const matchClass = matchFilters.classVal
+        ? matchPlayers.some(p => p.classVal.toString() === matchFilters.classVal)
+        : true;
+
+      // Check search term - search by player name or sport name
+      const searchLower = matchSearchTerm.toLowerCase();
+      const matchSearch = matchSearchTerm
+        ? matchPlayers.some(p => p.name.toLowerCase().includes(searchLower)) ||
+        match.sport.toLowerCase().includes(searchLower)
+        : true;
+
+      return matchSport && matchCategory && matchGender && matchClass && matchSearch;
+    });
+
+    const teacherAssignedGame = userRole === 'teacher' && isTeacherLoggedIn ? getTeacherAssignedGame() : null;
+
+    // Show initial choice screen if no mode selected (only for teachers, not admins)
+    if (schedulerViewMode === 'initial' && userRole !== 'admin') {
+      return (
+        <div className="space-y-6 animate-in fade-in duration-500">
+          <TeacherGameHeader />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto mt-12">
+            {/* Manual Schedule Option */}
+            <Card
+              className="p-8 border-2 border-indigo-200 hover:border-indigo-600 hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-indigo-50 to-white"
+            >
+              <div className="text-center">
+                <Calendar size={48} className="mx-auto text-indigo-600 mb-4" />
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Manual Schedule</h2>
+                <p className="text-slate-600 mb-6">Manually select students and create matches based on your choices</p>
+                <Button onClick={() => setSchedulerViewMode('manual')} className="w-full">
+                  <Calendar size={18} /> Start Manual Scheduling
+                </Button>
+              </div>
+            </Card>
+
+            {/* Auto Schedule Option */}
+            <Card
+              className="p-8 border-2 border-emerald-200 hover:border-emerald-600 hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-emerald-50 to-white"
+            >
+              <div className="text-center">
+                <Zap size={48} className="mx-auto text-emerald-600 mb-4" />
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Auto Schedule</h2>
+                <p className="text-slate-600 mb-6">Automatically create random matches for all eligible students</p>
+                <Button onClick={() => {
+                  setSchedulerViewMode('bracket');
+                  autoScheduleAllMatches();
+                }} variant="success" className="w-full">
+                  <Zap size={18} /> Start Auto Scheduling
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      );
+    }
 
     return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Teacher's Assigned Game Info */}
-      {userRole === 'teacher' && teacherAssignedGame && (
-        <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-          <div className="text-sm"><span className="font-semibold text-slate-700">Assigned Game:</span> <span className="text-indigo-700 font-bold">{teacherAssignedGame}</span></div>
-        </div>
-      )}
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <TeacherGameHeader />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Search Section */}
+        <Card className="p-4 bg-indigo-50 border-indigo-100 shadow-sm">
+          <Input
+            value={matchSearchTerm}
+            onChange={e => setMatchSearchTerm(e.target.value)}
+            placeholder="Search by player name or sport..."
+            className="w-full"
+          />
+        </Card>
 
-        {/* Scheduler Controls */}
-        <div className="lg:col-span-1">
-          <Card className="p-6 sticky top-24 border-indigo-100 shadow-md bg-slate-50">
-            <div className="flex justify-between items-start mb-4">
-              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                <Calendar size={20} className="text-indigo-600" /> Schedule Match
-              </h3>
-              <Button 
-                onClick={autoScheduleAllMatches}
-                className="text-xs h-8 px-2"
-                title="Auto-schedule all possible matches randomly"
-              >
-                Auto Schedule
-              </Button>
-            </div>
-
-            <div className="space-y-4">
-              {/* Step 1: Select Sport */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">1. Select Sport</label>
-                <Select
-                  value={scheduleForm.sport}
-                  onChange={e => setScheduleForm({ sport: e.target.value, category: '', playerCount: getGamePlayerCount(e.target.value), playerIds: [] })}
-                  options={games.map(s => ({ value: s, label: s }))}
-                  placeholder="Choose Sport..."
-                />
-              </div>
-
-              {/* Step 2: Select Number of Players */}
-              {scheduleForm.sport && (
-                <div className="animate-in slide-in-from-left-4 fade-in duration-300">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">2. Number of Players</label>
-                  {isGamePlayerCountFixed(scheduleForm.sport) ? (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <div className="text-sm font-bold text-amber-900">{getGamePlayerCount(scheduleForm.sport)} Players (Fixed)</div>
-                      <p className="text-xs text-amber-700 mt-1">This game has a fixed player count and cannot be changed.</p>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <Select
-                        value={scheduleForm.playerCount.toString()}
-                        onChange={e => setScheduleForm({ ...scheduleForm, playerCount: parseInt(e.target.value), playerIds: [] })}
-                        options={Array.from({ length: 19 }, (_, i) => i + 2).map(n => ({ value: n.toString(), label: `${n} Players` }))}
-                        placeholder="Select..."
-                      />
-                    </div>
-                  )}
-                  <p className="text-xs text-slate-500 mt-2">Admin default: {getGamePlayerCount(scheduleForm.sport)} players</p>
-                </div>
-              )}
-
-              {/* Players Required Info */}
-              {scheduleForm.sport && (
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg animate-in slide-in-from-left-4 fade-in duration-300">
-                  <div className="text-xs font-semibold text-blue-900">Players to Select</div>
-                  <div className="text-lg font-bold text-blue-600 mt-1">{scheduleForm.playerCount} Player{scheduleForm.playerCount !== 1 ? 's' : ''}</div>
-                  <div className="text-xs text-blue-700 mt-1">Select exactly {scheduleForm.playerCount} player{scheduleForm.playerCount !== 1 ? 's' : ''} to schedule this match</div>
-                </div>
-              )}
-
-              {/* Step 3: Select Category (Dynamic) */}
-              {scheduleForm.sport && (
-                <div className="animate-in slide-in-from-left-4 fade-in duration-300">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">3. Select Category</label>
-                  {availableCategoriesForSport.length > 0 ? (
-                    <Select
-                      value={scheduleForm.category}
-                      onChange={e => setScheduleForm({ ...scheduleForm, category: e.target.value, playerIds: [] })}
-                      options={availableCategoriesForSport.map(c => ({ value: c, label: c }))}
-                      placeholder="Choose Group..."
-                    />
-                  ) : (
-                    <div className="text-sm text-red-500 italic bg-red-50 p-2 rounded border border-red-100">
-                      No eligible students found for {scheduleForm.sport}. <br />
-                      <span className="text-xs text-red-400">All registered players might have already played.</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 4: Select Players */}
-              {scheduleForm.category && (
-                <div className="space-y-3 animate-in slide-in-from-left-4 fade-in duration-300">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">
-                      4. Select Players
-                      <span className={`ml-2 px-2 py-0.5 rounded text-xs font-bold ${scheduleForm.playerIds.length === scheduleForm.playerCount ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {scheduleForm.playerIds.length}/{scheduleForm.playerCount}
-                      </span>
-                    </label>
-                    <div className="space-y-2 max-h-80 overflow-y-auto">
-                      {filteredPlayersForMatch.map(player => (
-                        <button
-                          key={player.id}
-                          onClick={() => togglePlayerSelection(player.id)}
-                          className={`w-full text-left p-2 rounded-lg border transition-all text-sm ${
-                            scheduleForm.playerIds.includes(player.id)
-                              ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-semibold shadow-sm'
-                              : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-300'
-                          }`}
-                          disabled={!scheduleForm.playerIds.includes(player.id) && scheduleForm.playerIds.length >= scheduleForm.playerCount}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>{player.name}</span>
-                            <span className="text-xs text-slate-500">Class {player.classVal}</span>
-                          </div>
-                        </button>
-                      ))}
-                      {filteredPlayersForMatch.length === 0 && (
-                        <div className="text-center py-8 text-slate-400">
-                          <p>No eligible players in this category.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <Button 
-                    onClick={scheduleMatch} 
-                    className="w-full mt-4"
-                    disabled={scheduleForm.playerIds.length !== scheduleForm.playerCount}
-                  >
-                    Create Match
-                  </Button>
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-
-        {/* Matches List */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-700">Scheduled Matches</h3>
-            <span className="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">
-              {displayMatches.filter(m => m.status === 'scheduled').length} Pending
-            </span>
+        {/* Comprehensive Filter Section */}
+        <Card className="p-6 border-indigo-100 shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-semibold text-slate-800">Filter Matches</h3>
+            <Button
+              onClick={() => setMatchFilters({ category: '', gender: '', classVal: '', sport: '' })}
+              variant="secondary"
+              className="text-xs"
+            >
+              <X size={14} /> Reset Filters
+            </Button>
           </div>
-
-          <div className="space-y-3">
-            {displayMatches.filter(m => m.status === 'scheduled').length === 0 && (
-              <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
-                <Calendar className="mx-auto text-slate-300 mb-2" size={48} />
-                <p className="text-slate-500">No active matches. Schedule one!</p>
-              </div>
-            )}
-
-            {displayMatches.filter(m => m.status === 'scheduled').map(match => {
-              const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
-              if (matchPlayers.length === 0) return null;
-
-              return (
-                <Card key={match.id} className="p-4 border-l-4 border-l-indigo-500 hover:shadow-md transition-shadow">
-                  <div className="flex flex-col gap-4">
-                    <div>
-                      <div className="text-xs font-bold text-indigo-600 uppercase mb-2">{match.sport} • {match.category}</div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <div className="text-xs text-slate-500 mb-2 font-semibold">Players ({matchPlayers.length}):</div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {matchPlayers.map((player, idx) => (
-                            <div key={player.id} className="flex items-center gap-2">
-                              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">
-                                {idx + 1}
-                              </span>
-                              <span className="font-bold text-slate-800">{player.name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {match.sport === 'Carrom (2vs2)' ? (
-                        // For Carrom (2vs2), show pair selection buttons
-                        (() => {
-                          const pairs = [];
-                          for (let i = 0; i < matchPlayers.length; i += 2) {
-                            if (i + 1 < matchPlayers.length) {
-                              pairs.push([matchPlayers[i], matchPlayers[i + 1]]);
-                            }
-                          }
-                          return pairs.map((pair, pairIndex) => (
-                            <Button
-                              key={pairIndex}
-                              onClick={() => declareWinner(match.id, pair.map(p => p.id))}
-                              className="flex-1 text-xs"
-                              variant="outline"
-                            >
-                              {pair.map(p => p.name).join(' & ')} Won
-                            </Button>
-                          ));
-                        })()
-                      ) : (
-                        // For other games, show individual player buttons
-                        matchPlayers.map(player => (
-                          <Button
-                            key={player.id}
-                            onClick={() => declareWinner(match.id, player.id)}
-                            className="flex-1 text-xs"
-                            variant="outline"
-                          >
-                            {player.name} Won
-                          </Button>
-                        ))
-                      )}
-                      <button onClick={() => deleteMatch(match.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-
-          {/* Finished Matches Section */}
-          {displayMatches.some(m => m.status === 'finished') && (
-            <div className="mt-8 pt-6 border-t border-slate-200">
-              <h3 className="font-bold text-slate-700 mb-4">Completed Matches</h3>
-              <div className="grid gap-3 opacity-75">
-                {displayMatches.filter(m => m.status === 'finished').reverse().map(match => {
-                  const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
-                  let winnerDisplay = '';
-                  let winnerBadge = '';
-
-                  if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
-                    // For team games, show both winners
-                    const winners = students.filter(s => match.winnerId.includes(s.id));
-                    winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
-                    winnerBadge = `Winners: ${winnerDisplay}`;
-                  } else {
-                    // For individual games, show single winner
-                    const winner = students.find(s => s.id === match.winnerId);
-                    winnerDisplay = winner?.name || 'Unknown';
-                    winnerBadge = `Winner: ${winnerDisplay}`;
-                  }
-
-                  if (matchPlayers.length === 0) return null;
-
-                  return (
-                    <div key={match.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center">
-                      <div>
-                        <div className="text-xs font-semibold text-slate-500">{match.sport}</div>
-                        <div className="text-sm flex flex-wrap gap-1">
-                          {matchPlayers.map((player, idx) => {
-                            const isWinner = match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)
-                              ? match.winnerId.includes(player.id)
-                              : match.winnerId === player.id;
-                            return (
-                              <span key={player.id} className={isWinner ? "font-bold text-emerald-600" : "text-slate-500"}>
-                                {idx > 0 && <span className="mx-1 text-slate-300">•</span>}
-                                {player.name}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <Badge color="green">{winnerBadge}</Badge>
-                    </div>
-                  );
-                })}
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Category</label>
+              <Select
+                value={matchFilters.category}
+                onChange={e => setMatchFilters({ ...matchFilters, category: e.target.value })}
+                options={[
+                  { value: 'Junior (1-3)', label: 'Junior (1-3)' },
+                  { value: 'Middle (4-6)', label: 'Middle (4-6)' },
+                  { value: 'Senior (7-10)', label: 'Senior (7-10)' }
+                ]}
+                placeholder="All Categories"
+              />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Gender</label>
+              <Select
+                value={matchFilters.gender}
+                onChange={e => setMatchFilters({ ...matchFilters, gender: e.target.value })}
+                options={[
+                  { value: 'Boys', label: 'Boys' },
+                  { value: 'Girls', label: 'Girls' }
+                ]}
+                placeholder="All Genders"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Class</label>
+              <Select
+                value={matchFilters.classVal}
+                onChange={e => setMatchFilters({ ...matchFilters, classVal: e.target.value })}
+                options={Array.from({ length: 10 }, (_, i) => i + 1).map(c => ({ value: c.toString(), label: `Class ${c}` }))}
+                placeholder="All Classes"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Sport</label>
+              <Select
+                value={matchFilters.sport}
+                onChange={e => setMatchFilters({ ...matchFilters, sport: e.target.value })}
+                options={games.map(s => ({ value: s, label: s }))}
+                placeholder="All Sports"
+              />
+            </div>
+          </div>
+        </Card>
+
+        {/* Match Count Display */}
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <CheckCircle2 size={16} className="text-emerald-500" />
+          {(matchSearchTerm || matchFilters.category || matchFilters.gender || matchFilters.classVal || matchFilters.sport) ? (
+            <>
+              Showing <strong>{displayMatches.length}</strong> filtered matches
+              (<strong>{displayMatches.filter(m => m.status === 'finished').length}</strong> completed,{' '}
+              <strong>{displayMatches.filter(m => m.status === 'scheduled').length}</strong> pending)
+            </>
+          ) : (
+            <>
+              Total <strong>{displayMatches.length}</strong> matches
+              (<strong>{displayMatches.filter(m => m.status === 'finished').length}</strong> completed,{' '}
+              <strong>{displayMatches.filter(m => m.status === 'scheduled').length}</strong> pending)
+            </>
           )}
         </div>
+
+        {userRole !== 'admin' && (
+          <div className="flex gap-2 mb-4">
+            <Button
+              onClick={() => setSchedulerViewMode('initial')}
+              variant="outline"
+              className="text-xs h-8 px-3"
+            >
+              <ChevronRight size={14} className="rotate-180" /> Back
+            </Button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+          {/* Scheduler Controls - Only for Manual and Not Admin */}
+          {schedulerViewMode === 'manual' && userRole !== 'admin' && (
+            <div className="lg:col-span-1">
+              <Card className="p-6 sticky top-24 border-indigo-100 shadow-md bg-slate-50">
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                    <Calendar size={20} className="text-indigo-600" /> Schedule Match
+                  </h3>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Step 1: Select Sport */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">1. Select Sport</label>
+                    {userRole === 'teacher' && isTeacherLoggedIn ? (
+                      // For teachers: show disabled field with their assigned sport
+                      <div className="w-full px-4 py-2 rounded-lg border border-slate-300 bg-slate-100 text-slate-700 font-medium flex items-center gap-2">
+                        <Trophy size={16} className="text-indigo-600" />
+                        {teacherAssignedGame || 'No sport assigned'}
+                      </div>
+                    ) : (
+                      // For admins: show full dropdown
+                      <Select
+                        value={scheduleForm.sport}
+                        onChange={e => setScheduleForm({ sport: e.target.value, category: '', playerCount: getGamePlayerCount(e.target.value), playerIds: [] })}
+                        options={games.map(s => ({ value: s, label: s }))}
+                        placeholder="Choose Sport..."
+                      />
+                    )}
+                  </div>
+
+                  {/* Step 2: Select Number of Players */}
+                  {scheduleForm.sport && (
+                    <div className="animate-in slide-in-from-left-4 fade-in duration-300">
+                      <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">2. Number of Players</label>
+                      {isGamePlayerCountFixed(scheduleForm.sport) ? (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                          <div className="text-sm font-bold text-amber-900">{getGamePlayerCount(scheduleForm.sport)} Players (Fixed)</div>
+                          <p className="text-xs text-amber-700 mt-1">This game has a fixed player count and cannot be changed.</p>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Select
+                            value={scheduleForm.playerCount.toString()}
+                            onChange={e => setScheduleForm({ ...scheduleForm, playerCount: parseInt(e.target.value), playerIds: [] })}
+                            options={Array.from({ length: 19 }, (_, i) => i + 2).map(n => ({ value: n.toString(), label: `${n} Players` }))}
+                            placeholder="Select..."
+                          />
+                        </div>
+                      )}
+                      <p className="text-xs text-slate-500 mt-2">Admin default: {getGamePlayerCount(scheduleForm.sport)} players</p>
+                    </div>
+                  )}
+
+                  {/* Players Required Info */}
+                  {scheduleForm.sport && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg animate-in slide-in-from-left-4 fade-in duration-300">
+                      <div className="text-xs font-semibold text-blue-900">Players to Select</div>
+                      <div className="text-lg font-bold text-blue-600 mt-1">{scheduleForm.playerCount} Player{scheduleForm.playerCount !== 1 ? 's' : ''}</div>
+                      <div className="text-xs text-blue-700 mt-1">Select exactly {scheduleForm.playerCount} player{scheduleForm.playerCount !== 1 ? 's' : ''} to schedule this match</div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Select Category (Dynamic) */}
+                  {scheduleForm.sport && (
+                    <div className="animate-in slide-in-from-left-4 fade-in duration-300">
+                      <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">3. Select Category</label>
+                      {availableCategoriesForSport.length > 0 ? (
+                        <Select
+                          value={scheduleForm.category}
+                          onChange={e => setScheduleForm({ ...scheduleForm, category: e.target.value, playerIds: [] })}
+                          options={availableCategoriesForSport.map(c => ({ value: c, label: c }))}
+                          placeholder="Choose Group..."
+                        />
+                      ) : (
+                        <div className="text-sm text-red-500 italic bg-red-50 p-2 rounded border border-red-100">
+                          No eligible students found for {scheduleForm.sport}. <br />
+                          <span className="text-xs text-red-400">All registered players might have already played.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Step 4: Select Players */}
+                  {scheduleForm.category && (
+                    <div className="space-y-3 animate-in slide-in-from-left-4 fade-in duration-300">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">
+                          4. Select Players
+                          <span className={`ml-2 px-2 py-0.5 rounded text-xs font-bold ${scheduleForm.playerIds.length === scheduleForm.playerCount ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {scheduleForm.playerIds.length}/{scheduleForm.playerCount}
+                          </span>
+                        </label>
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                          {filteredPlayersForMatch.map(player => (
+                            <button
+                              key={player.id}
+                              onClick={() => togglePlayerSelection(player.id)}
+                              className={`w-full text-left p-2 rounded-lg border transition-all text-sm ${scheduleForm.playerIds.includes(player.id)
+                                ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-semibold shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-300'
+                                }`}
+                              disabled={!scheduleForm.playerIds.includes(player.id) && scheduleForm.playerIds.length >= scheduleForm.playerCount}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span>{player.name}</span>
+                                <span className="text-xs text-slate-500">Class {player.classVal}</span>
+                              </div>
+                            </button>
+                          ))}
+                          {filteredPlayersForMatch.length === 0 && (
+                            <div className="text-center py-8 text-slate-400">
+                              <p>No eligible players in this category.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <Button
+                        onClick={scheduleMatch}
+                        className="w-full mt-4"
+                        disabled={scheduleForm.playerIds.length !== scheduleForm.playerCount}
+                      >
+                        Create Match
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Matches List */}
+          <div className={schedulerViewMode === 'manual' ? 'lg:col-span-2' : 'lg:col-span-3'} >
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <h3 className="font-bold text-slate-700">Scheduled Matches</h3>
+              <span className="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">
+                {displayMatches.filter(m => m.status === 'scheduled').length} Pending
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {displayMatches.filter(m => m.status === 'scheduled').length === 0 && (
+                <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+                  <Calendar className="mx-auto text-slate-300 mb-2" size={48} />
+                  <p className="text-slate-500">No active matches. Schedule one!</p>
+                </div>
+              )}
+
+              {displayMatches.filter(m => m.status === 'scheduled').map(match => {
+                const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
+                if (matchPlayers.length === 0) return null;
+
+                return (
+                  <Card key={match.id} className="p-4 border-l-4 border-l-indigo-500 hover:shadow-md transition-shadow">
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <div className="text-xs font-bold text-indigo-600 uppercase mb-2">{match.sport} • {match.category}</div>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                          <div className="text-xs text-slate-500 mb-2 font-semibold">Players ({matchPlayers.length}):</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {matchPlayers.map((player, idx) => (
+                              <div key={player.id} className="flex items-center gap-2">
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">
+                                  {idx + 1}
+                                </span>
+                                <span className="font-bold text-slate-800">{player.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {userRole !== 'admin' && (
+                        <div className="flex flex-wrap gap-2">
+                          {match.sport === 'Carrom (2vs2)' ? (
+                            // For Carrom (2vs2), show pair selection buttons
+                            (() => {
+                              const pairs = [];
+                              for (let i = 0; i < matchPlayers.length; i += 2) {
+                                if (i + 1 < matchPlayers.length) {
+                                  pairs.push([matchPlayers[i], matchPlayers[i + 1]]);
+                                }
+                              }
+                              return pairs.map((pair, pairIndex) => (
+                                <Button
+                                  key={pairIndex}
+                                  onClick={() => declareWinner(match.id, pair.map(p => p.id))}
+                                  className="flex-1 text-xs"
+                                  variant="outline"
+                                >
+                                  {pair.map(p => p.name).join(' & ')} Won
+                                </Button>
+                              ));
+                            })()
+                          ) : (
+                            // For other games, show individual player buttons
+                            matchPlayers.map(player => (
+                              <Button
+                                key={player.id}
+                                onClick={() => declareWinner(match.id, player.id)}
+                                className="flex-1 text-xs"
+                                variant="outline"
+                              >
+                                {player.name} Won
+                              </Button>
+                            ))
+                          )}
+                          <button onClick={() => deleteMatch(match.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Finished Matches Section */}
+            {displayMatches.some(m => m.status === 'finished') && (
+              <div className="mt-8 pt-6 border-t border-slate-200">
+                <h3 className="font-bold text-slate-700 mb-4">Completed Matches</h3>
+                <div className="grid gap-3 opacity-75">
+                  {displayMatches.filter(m => m.status === 'finished').reverse().map(match => {
+                    const matchPlayers = students.filter(s => match.playerIds && match.playerIds.includes(s.id));
+                    let winnerDisplay = '';
+                    let winnerBadge = '';
+
+                    if (match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)) {
+                      // For team games, show both winners
+                      const winners = students.filter(s => match.winnerId.includes(s.id));
+                      winnerDisplay = winners.map(w => w?.name || 'Unknown').join(' & ');
+                      winnerBadge = `Winners: ${winnerDisplay}`;
+                    } else {
+                      // For individual games, show single winner
+                      const winner = students.find(s => s.id === match.winnerId);
+                      winnerDisplay = winner?.name || 'Unknown';
+                      winnerBadge = `Winner: ${winnerDisplay}`;
+                    }
+
+                    if (matchPlayers.length === 0) return null;
+
+                    // Show edit mode if this match is being edited
+                    if (editingMatchId === match.id) {
+                      return (
+                        <div key={match.id} className="bg-blue-50 p-4 rounded-lg border-2 border-blue-300">
+                          <div className="mb-3">
+                            <div className="text-sm font-bold text-slate-700 mb-2">Change Winner:</div>
+                            <div className="space-y-2">
+                              {match.sport === 'Carrom (2vs2)' ? (
+                                // For Carrom (2vs2), show pair selection buttons
+                                (() => {
+                                  const pairs = [];
+                                  for (let i = 0; i < matchPlayers.length; i += 2) {
+                                    if (i + 1 < matchPlayers.length) {
+                                      pairs.push([matchPlayers[i], matchPlayers[i + 1]]);
+                                    }
+                                  }
+                                  return pairs.map((pair, pairIndex) => (
+                                    <Button
+                                      key={pairIndex}
+                                      onClick={() => {
+                                        declareWinner(match.id, pair.map(p => p.id));
+                                        setEditingMatchId(null);
+                                      }}
+                                      className="w-full text-xs"
+                                      variant={Array.isArray(match.winnerId) && pair.every(p => match.winnerId.includes(p.id)) ? 'primary' : 'secondary'}
+                                    >
+                                      {pair.map(p => p.name).join(' & ')} Won
+                                    </Button>
+                                  ));
+                                })()
+                              ) : (
+                                // For other games, show individual player buttons
+                                matchPlayers.map(player => (
+                                  <Button
+                                    key={player.id}
+                                    onClick={() => {
+                                      declareWinner(match.id, player.id);
+                                      setEditingMatchId(null);
+                                    }}
+                                    className="w-full text-xs"
+                                    variant={match.winnerId === player.id ? 'primary' : 'secondary'}
+                                  >
+                                    {player.name} Won
+                                  </Button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            onClick={() => setEditingMatchId(null)}
+                            variant="outline"
+                            className="w-full text-xs"
+                          >
+                            <X size={14} /> Cancel
+                          </Button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={match.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center gap-3">
+                        <div className="flex-1">
+                          <div className="text-xs font-semibold text-slate-500">{match.sport}</div>
+                          <div className="text-sm flex flex-wrap gap-1">
+                            {matchPlayers.map((player, idx) => {
+                              const isWinner = match.sport === 'Carrom (2vs2)' && Array.isArray(match.winnerId)
+                                ? match.winnerId.includes(player.id)
+                                : match.winnerId === player.id;
+                              return (
+                                <span key={player.id} className={isWinner ? "font-bold text-emerald-600" : "text-slate-500"}>
+                                  {idx > 0 && <span className="mx-1 text-slate-300">•</span>}
+                                  {player.name}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge color="green">{winnerBadge}</Badge>
+                          {userRole !== 'admin' && (
+                            <button
+                              onClick={() => setEditingMatchId(match.id)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              title="Edit Winner"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
     );
   };
 
   const renderResults = () => {
     // Group winners by sport and category
     let winnersMatches = matches.filter(m => m.status === 'finished');
-    
+
     // If teacher is viewing, filter by their assigned game
-    if (userRole === 'teacher' && currentTeacherId) {
+    if (userRole === 'teacher' && isTeacherLoggedIn) {
       winnersMatches = getTeacherMatches().filter(m => m.status === 'finished');
     }
 
+    // Apply sport filter if selected
+    if (resultsSportFilter) {
+      winnersMatches = winnersMatches.filter(m => m.sport === resultsSportFilter);
+    }
+
+    // Sort by completed timestamp (most recent first)
+    winnersMatches = winnersMatches.sort((a, b) => {
+      const dateA = a.completedTimestamp ? new Date(a.completedTimestamp).getTime() : 0;
+      const dateB = b.completedTimestamp ? new Date(b.completedTimestamp).getTime() : 0;
+      return dateB - dateA; // Most recent first
+    });
+
+    // Get unique sports from all finished matches for filter buttons
+    const allFinishedMatches = userRole === 'teacher' && isTeacherLoggedIn
+      ? getTeacherMatches().filter(m => m.status === 'finished')
+      : matches.filter(m => m.status === 'finished');
+    const availableSports = [...new Set(allFinishedMatches.map(m => m.sport))];
+
     return (
       <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl mx-auto">
-        {/* Teacher's Assigned Game Info */}
-        {userRole === 'teacher' && currentTeacherId && (
-          <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-            <div className="text-sm"><span className="font-semibold text-slate-700">Assigned Game:</span> <span className="text-indigo-700 font-bold">{getTeacherAssignedGame()}</span></div>
-          </div>
-        )}
+        <TeacherGameHeader />
 
         <div className="text-center mb-8">
           <h2 className="text-2xl font-bold text-slate-800">Tournament Results</h2>
           <p className="text-slate-500">Hall of Fame</p>
         </div>
+
+        {/* Sport Filter Buttons */}
+        {availableSports.length > 0 && (
+          <Card className="p-4">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm font-semibold text-slate-700 mr-2">Filter by Sport:</span>
+              <button
+                onClick={() => setResultsSportFilter('')}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${resultsSportFilter === ''
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/50 scale-105'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+              >
+                All Sports
+              </button>
+              {availableSports.map(sport => (
+                <button
+                  key={sport}
+                  onClick={() => setResultsSportFilter(sport)}
+                  className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${resultsSportFilter === sport
+                      ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/50 scale-105 animate-pulse'
+                      : 'bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'
+                    }`}
+                >
+                  {sport}
+                </button>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {winnersMatches.length === 0 ? (
@@ -2418,17 +3144,27 @@ export default function App() {
 
               if (!winnerDisplay || matchPlayers.length === 0) return null;
 
+              // Format dates
+              const scheduledDate = match.timestamp ? new Date(match.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : 'N/A';
+              const completedDate = match.completedTimestamp ? new Date(match.completedTimestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : 'N/A';
+
               return (
-                <Card key={match.id} className="p-4 flex items-center gap-4 hover:shadow-md transition-shadow border-l-4 border-l-amber-400">
-                  <div className="bg-amber-100 text-amber-600 p-3 rounded-full">
-                    <Trophy size={20} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">{match.sport}</div>
-                    <div className="text-xs text-indigo-500 font-semibold mb-1">{match.category}</div>
-                    <div className="font-bold text-slate-800 text-lg">{winnerDisplay}</div>
-                    <div className="text-xs text-slate-500">
-                      Competed with {competedWith}
+                <Card key={match.id} className="p-4 hover:shadow-md transition-shadow border-l-4 border-l-amber-400">
+                  <div className="flex items-start gap-4">
+                    <div className="bg-amber-100 text-amber-600 p-3 rounded-full flex-shrink-0">
+                      <Trophy size={20} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">{match.sport}</div>
+                      <div className="text-xs text-indigo-500 font-semibold mb-1">{match.category}</div>
+                      <div className="font-bold text-slate-800 text-lg">{winnerDisplay}</div>
+                      <div className="text-xs text-slate-500 mb-2">
+                        Competed with {competedWith}
+                      </div>
+                      <div className="flex flex-col gap-1 text-xs text-slate-600 border-t border-slate-200 pt-2 mt-2">
+                        <div><span className="font-semibold">Scheduled:</span> {scheduledDate}</div>
+                        <div><span className="font-semibold">Completed:</span> {completedDate}</div>
+                      </div>
                     </div>
                   </div>
                 </Card>
@@ -2462,7 +3198,7 @@ export default function App() {
       const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
       const gender = genders[Math.floor(Math.random() * genders.length)];
       const fatherName = `${fatherFirstNames[Math.floor(Math.random() * fatherFirstNames.length)]} ${lastName}`;
-      
+
       const sports = [];
       const sportsCount = Math.floor(Math.random() * 3) + 1; // 1-3 sports
       const availableSports = [...games];
@@ -2498,28 +3234,28 @@ export default function App() {
       <Card className="p-6 border-indigo-100 shadow-sm">
         <h3 className="font-semibold text-slate-800 mb-4">Quick Generate Options</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Button 
+          <Button
             onClick={() => createDummyParticipants(10)}
             className="h-20 flex flex-col items-center justify-center gap-2 text-center"
           >
             <span className="text-2xl font-bold">10</span>
             <span className="text-xs">Participants</span>
           </Button>
-          <Button 
+          <Button
             onClick={() => createDummyParticipants(25)}
             className="h-20 flex flex-col items-center justify-center gap-2 text-center"
           >
             <span className="text-2xl font-bold">25</span>
             <span className="text-xs">Participants</span>
           </Button>
-          <Button 
+          <Button
             onClick={() => createDummyParticipants(50)}
             className="h-20 flex flex-col items-center justify-center gap-2 text-center"
           >
             <span className="text-2xl font-bold">50</span>
             <span className="text-xs">Participants</span>
           </Button>
-          <Button 
+          <Button
             onClick={() => createDummyParticipants(100)}
             className="h-20 flex flex-col items-center justify-center gap-2 text-center"
           >
@@ -2554,7 +3290,7 @@ export default function App() {
   const getTabs = () => {
     const baseTabs = [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'participants', label: 'Participants', icon: Table2 },
+      { id: 'participants', label: 'All Participants', icon: Table2 },
       { id: 'scheduler', label: 'Competition', icon: Calendar },
       { id: 'results', label: 'Results', icon: Medal },
     ];
@@ -2614,32 +3350,6 @@ export default function App() {
                 <option value="teacher">👨‍🏫 Teacher</option>
               </select>
             </div>
-
-            {/* Teacher Selector (shown only in admin when using teacher role for preview) */}
-            {userRole === 'teacher' && !isTeacherLoggedIn && teachers.length > 0 && (
-              <div className="ml-4 flex items-center gap-2">
-                <span className="text-xs font-semibold text-indigo-100">Teacher:</span>
-                <select
-                  value={currentTeacherId}
-                  onChange={e => setCurrentTeacherId(e.target.value)}
-                  className="px-2 py-1 rounded bg-indigo-500 text-white text-xs font-semibold hover:bg-indigo-400 transition-colors cursor-pointer"
-                >
-                  <option value="">Select teacher...</option>
-                  {teachers.map(teacher => {
-                    // Find which game this teacher is assigned to
-                    const assignedGame = Object.entries(gameTeacherAssignments).find(([_, teacherIds]) => 
-                      teacherIds.includes(teacher.id)
-                    )?.[0];
-                    
-                    return (
-                      <option key={teacher.id} value={teacher.id}>
-                        {teacher.name} {assignedGame ? `(${assignedGame})` : '(Not Assigned)'}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            )}
 
             {/* Logout button for logged-in teachers */}
             {userRole === 'teacher' && isTeacherLoggedIn && (
